@@ -1,0 +1,121 @@
+// Gözdem Burak Turizm — veri modeli
+// Not: Yerelde SQLite kullanılıyor (enum desteklemez), bu yüzden durum alanları String.
+// Canlıda PostgreSQL'e geçince provider = "postgresql" yeterli.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Tour {
+  id                String    @id @default(cuid())
+  slug              String    @unique
+  title             String
+  destination       String
+  category          String // YURT_ICI | YURT_DISI
+  bookingType       String // KOLTUK | KONTENJAN
+  departureDate     DateTime
+  returnDate        DateTime?
+  departureLocation String
+  durationDays      Int       @default(1)
+  price             Int
+  currency          String    @default("TRY")
+  coverImage        String
+  images            String    @default("[]") // JSON dizi
+  description       String    @default("")
+  highlights        String    @default("[]") // JSON dizi
+  capacity          Int? // KONTENJAN turları için
+  vehicleType       String? // OTOBUS | VIP | MINIBUS (KOLTUK turları için)
+  seatLayout        String? // 2+2 | 2+1 | 1+1 (araç tipinden türetilir)
+  seatRows          Int?
+  status            String    @default("YAYINDA") // TASLAK | YAYINDA
+  createdAt         DateTime  @default(now())
+
+  seats    Seat[]
+  bookings Booking[]
+  places   TourPlace[]
+}
+
+model TourPlace {
+  id        String  @id @default(cuid())
+  tourId    String
+  tour      Tour    @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  type      String // DURAK | OTEL
+  name      String
+  address   String?
+  mapQuery  String? // gömme harita için: adres veya "enlem,boylam"
+  nights    Int? // OTEL için gece sayısı (opsiyonel)
+  sortOrder Int     @default(0)
+}
+
+model Seat {
+  id     String  @id @default(cuid())
+  tourId String
+  tour   Tour    @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  code   String
+  status String  @default("BOS") // BOS | KILITLI | SATILDI
+  gender String? // E | K — dolu koltuğun yolcu cinsiyeti (yan yana kuralı için)
+
+  @@unique([tourId, code])
+}
+
+model Booking {
+  id            String    @id @default(cuid())
+  tourId        String
+  tour          Tour      @relation(fields: [tourId], references: [id])
+  status        String    @default("BEKLIYOR") // BEKLIYOR | ODENDI | IPTAL | SURE_DOLDU
+  totalAmount   Int
+  contactName   String
+  contactPhone  String
+  contactEmail  String
+  quantity      Int       @default(1)
+  paymentRef     String?
+  holdExpiresAt  DateTime?
+  reminderSentAt DateTime? // 24s öncesi hatırlatma gönderildi mi
+  createdAt      DateTime  @default(now())
+
+  passengers Passenger[]
+}
+
+model Passenger {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  firstName String
+  lastName  String
+  idNumber  String?
+  seatCode  String?
+  gender    String?
+}
+
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  subtitle  String   @default("")
+  image     String
+  linkUrl   String   @default("")
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model AdminUser {
+  id           String @id @default(cuid())
+  email        String @unique
+  passwordHash String
+}
+
+model Review {
+  id        String   @id @default(cuid())
+  author    String
+  rating    Int      @default(5) // 1-5
+  text      String
+  location  String? // örn. "Kapadokya Turu" veya şehir
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
