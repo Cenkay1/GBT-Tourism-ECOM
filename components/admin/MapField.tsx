@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { mapEmbedUrl } from "@/lib/shared";
+import PlaceAutocomplete from "@/components/admin/PlaceAutocomplete";
 
-// İsim yazılınca (örn. "Dudullu Terminal") haritada o konumu önizleyen alan.
+// Konum yazılınca Google önerileri açılır; seçilen yer haritada önizlenir.
 export default function MapField({
   name,
   defaultValue,
@@ -23,14 +24,16 @@ export default function MapField({
   return (
     <div>
       <span className="block text-sm font-medium text-slate-600">{label}</span>
+      {/* Form gönderimi için gerçek değer */}
+      <input type="hidden" name={name} value={value} required={required} />
       <div className="mt-1 flex gap-2">
-        <input
-          name={name}
+        <PlaceAutocomplete
           value={value}
-          required={required}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder={placeholder ?? "Örn. Dudullu Terminal, İstanbul"}
-          className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
+          onTextChange={setValue}
+          onSelect={(sel) => setValue(sel.name)}
+          placeholder={placeholder ?? "Konum yazın — örn. Dudullu Terminal"}
+          className="flex-1"
+          inputClassName="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
         />
         <button
           type="button"

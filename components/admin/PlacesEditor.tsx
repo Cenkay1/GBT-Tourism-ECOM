@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { mapEmbedUrl } from "@/lib/shared";
+import PlaceAutocomplete from "@/components/admin/PlaceAutocomplete";
 
 export interface PlaceRow {
   type: "DURAK" | "OTEL";
@@ -74,15 +75,19 @@ export default function PlacesEditor({
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <input
+              <PlaceAutocomplete
                 value={row.name}
-                onChange={(e) => update(i, { name: e.target.value })}
+                onTextChange={(text) => update(i, { name: text })}
+                onSelect={(sel) =>
+                  update(i, { name: sel.name, address: sel.address, mapQuery: sel.mapQuery })
+                }
                 placeholder={
                   row.type === "OTEL"
-                    ? "Otel adı — örn. Kapadokya Cave Otel, Göreme"
-                    : "Durak adı — örn. Dudullu Terminal, İstanbul"
+                    ? "Otel adı yazın — örn. Kapadokya Cave Otel"
+                    : "Konum yazın — örn. Dudullu Terminal"
                 }
-                className={`${input} flex-1`}
+                className="min-w-0 flex-1"
+                inputClassName={input}
               />
               {row.type === "OTEL" && (
                 <input
@@ -103,17 +108,22 @@ export default function PlacesEditor({
                 {preview === i ? "Gizle" : "Haritada Gör"}
               </button>
             </div>
-            <p className="mt-1.5 text-[11px] text-slate-400">
-              Yazdığınız isim haritada aranır. Doğru yeri görmek için “Haritada Gör”e tıklayın; gerekirse
-              şehir/ilçe ekleyin (örn. “Dudullu Terminal, Ümraniye”).
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+              {row.mapQuery ? (
+                <span className="font-semibold text-green-600">
+                  ✓ Konum seçildi{row.address ? ` — ${row.address}` : ""}
+                </span>
+              ) : (
+                "Yazmaya başlayın, çıkan Google önerilerinden konumu seçin."
+              )}
             </p>
 
-            {preview === i && row.name.trim() && (
+            {preview === i && (row.mapQuery || row.name.trim()) && (
               <div className="mt-2 overflow-hidden rounded-xl ring-1 ring-black/5">
                 <iframe
-                  key={row.name}
+                  key={row.mapQuery || row.name}
                   title={row.name}
-                  src={mapEmbedUrl(row.name)}
+                  src={mapEmbedUrl(row.mapQuery || row.name)}
                   className="h-56 w-full"
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"

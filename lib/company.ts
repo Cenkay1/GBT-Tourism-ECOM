@@ -17,6 +17,10 @@ export const COMPANY = {
     reviewCount: 501,
     reviewsUrl:
       "https://www.google.com/search?q=G%C3%B6zdem+Burak+Turizm+Yorumlar",
+    // Google İşletme Profili "yorum yaz" deep-link'i (müşteri kendi hesabıyla gönderir).
+    placeId: "ChIJ8-A1fTdbnEARbSdJWSPCb0M",
+    writeReviewUrl:
+      "https://search.google.com/local/writereview?placeid=ChIJ8-A1fTdbnEARbSdJWSPCb0M",
   },
 };
 

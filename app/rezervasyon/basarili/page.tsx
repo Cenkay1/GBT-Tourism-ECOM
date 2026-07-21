@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
 import { ShieldIcon } from "@/components/Icons";
+import RateUsCard from "@/components/RateUsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -53,13 +53,9 @@ export default async function SuccessPage({
           </div>
         </div>
 
-        <Link
-          href="/"
-          className="mt-6 inline-block rounded-lg bg-brand px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
-        >
-          Ana Sayfaya Dön
-        </Link>
       </div>
+
+      <RateUsCard />
     </div>
   );
 }

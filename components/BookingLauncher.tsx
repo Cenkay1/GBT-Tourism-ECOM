@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Tour } from "@/lib/shared";
 import SeatMap from "@/components/SeatMap";
 import CapacityBooking from "@/components/CapacityBooking";
@@ -15,8 +16,12 @@ export default function BookingLauncher({
   label?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const isSeat = tour.bookingType === "KOLTUK";
   const btnLabel = label ?? (isSeat ? "Koltuk Seç" : "Rezervasyon Yap");
+
+  // Portal yalnızca istemcide (mount sonrası) kullanılabilir.
+  useEffect(() => setMounted(true), []);
 
   // Modal açıkken arka planı kilitle
   useEffect(() => {
@@ -28,17 +33,13 @@ export default function BookingLauncher({
     }
   }, [open]);
 
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className={className}>
-        {btnLabel}
-      </button>
-
-      {open && (
-        <div
-          className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 sm:p-6"
-          onClick={() => setOpen(false)}
-        >
+  // Modalı body'ye taşırız; aksi halde sticky/transform'lu ata öğelerin
+  // stacking context'ine hapsolup harita gibi öğelerin altında kalır.
+  const modal = (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 sm:p-6"
+      onClick={() => setOpen(false)}
+    >
           <div
             className="min-h-full w-full max-w-4xl bg-slate-50 shadow-xl sm:min-h-0 sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
@@ -68,8 +69,16 @@ export default function BookingLauncher({
               {isSeat ? <SeatMap tour={tour} /> : <CapacityBooking tour={tour} />}
             </div>
           </div>
-        </div>
-      )}
+    </div>
+  );
+
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={className}>
+        {btnLabel}
+      </button>
+
+      {open && mounted && createPortal(modal, document.body)}
     </>
   );
 }
