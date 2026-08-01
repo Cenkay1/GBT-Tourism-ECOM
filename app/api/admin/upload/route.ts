@@ -3,6 +3,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { getSessionEmail } from "@/lib/auth";
+import { uploadDir, uploadUrl } from "@/lib/uploads";
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -35,9 +36,9 @@ export async function POST(req: Request) {
   const ext = (file.name.split(".").pop() ?? "jpg").toLowerCase().replace(/[^a-z0-9]/g, "");
   const name = `${randomUUID()}.${ext || "jpg"}`;
 
-  const dir = path.join(process.cwd(), "public", "uploads");
+  const dir = uploadDir();
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, name), bytes);
 
-  return NextResponse.json({ url: `/uploads/${name}` });
+  return NextResponse.json({ url: uploadUrl(name) });
 }

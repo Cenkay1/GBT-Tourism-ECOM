@@ -9,6 +9,7 @@ import type {
   Gender,
   TourPlace,
   PlaceType,
+  Amenity,
 } from "@/lib/shared";
 import { releaseExpiredHolds } from "@/lib/booking";
 
@@ -57,6 +58,7 @@ type TourRow = {
   vehicleType: string | null;
   seatLayout: string | null;
   seatRows: number | null;
+  features: string;
   status: string;
 };
 
@@ -76,6 +78,7 @@ function toTour(
     soldSeats?: string[];
     seatGenders?: Record<string, Gender>;
     places?: TourPlace[];
+    amenities?: Amenity[];
   }
 ): Tour {
   return {
@@ -104,7 +107,32 @@ function toTour(
     soldSeats: extra?.soldSeats,
     seatGenders: extra?.seatGenders,
     places: extra?.places,
+    features: parseJsonArray(row.features),
+    amenities: extra?.amenities,
   };
+}
+
+// Aktif özellikler (admin form + genel kullanım).
+export async function getActiveAmenities(): Promise<Amenity[]> {
+  const rows = await prisma.amenity.findMany({
+    where: { active: true },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+  return rows.map((a) => ({
+    id: a.id,
+    name: a.name,
+    icon: a.icon,
+    active: a.active,
+    sortOrder: a.sortOrder,
+  }));
+}
+
+// Verilen id listesine karşılık gelen aktif özellikleri sıralı döndürür.
+async function resolveAmenities(ids: string[]): Promise<Amenity[]> {
+  if (ids.length === 0) return [];
+  const all = await getActiveAmenities();
+  const set = new Set(ids);
+  return all.filter((a) => set.has(a.id));
 }
 
 export async function getTourById(id: string): Promise<Tour | null> {
@@ -218,11 +246,14 @@ export async function getTourBySlug(slug: string): Promise<Tour | null> {
     sortOrder: p.sortOrder,
   }));
 
+  const amenities = await resolveAmenities(parseJsonArray(row.features));
+
   return toTour(row as TourRow, {
     soldSeats: takenSeats,
     seatGenders,
     sold: soldCount,
     places,
+    amenities,
   });
 }
 

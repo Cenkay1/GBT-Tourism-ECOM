@@ -5,6 +5,7 @@ import ImageUpload from "@/components/admin/ImageUpload";
 import GalleryUpload from "@/components/admin/GalleryUpload";
 import PlacesEditor, { PlaceRow } from "@/components/admin/PlacesEditor";
 import MapField from "@/components/admin/MapField";
+import type { Amenity } from "@/lib/shared";
 
 export interface TourFormValues {
   title?: string;
@@ -26,18 +27,28 @@ export interface TourFormValues {
   seatRows?: number;
   status?: string;
   places?: PlaceRow[];
+  features?: string[];
 }
 
 export default function TourForm({
   action,
   initial,
   submitLabel,
+  amenities = [],
 }: {
   action: (fd: FormData) => void;
   initial?: TourFormValues;
   submitLabel: string;
+  amenities?: Amenity[];
 }) {
   const [bookingType, setBookingType] = useState(initial?.bookingType ?? "KOLTUK");
+  const [features, setFeatures] = useState<string[]>(initial?.features ?? []);
+
+  function toggleFeature(id: string) {
+    setFeatures((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
 
   const input =
     "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand";
@@ -169,6 +180,52 @@ export default function TourForm({
           Öne Çıkanlar (her satıra bir madde)
           <textarea name="highlights" rows={3} defaultValue={initial?.highlights} className={input} placeholder={"2 gece konaklama\nRehberlik dahil"} />
         </label>
+      </Card>
+
+      <Card title="Fiyata Dahil Özellikler">
+        <input type="hidden" name="features" value={JSON.stringify(features)} />
+        {amenities.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            Henüz özellik tanımlanmamış.{" "}
+            <a href="/admin/ozellikler" className="font-medium text-brand underline">
+              Özellikler
+            </a>{" "}
+            sayfasından ekleyin (Konaklama, Kahvaltı, Rehber…).
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-slate-400">
+              Bu tura dahil olan hizmetleri işaretleyin. Tur sayfasında “Fiyata Dahil” olarak görünür.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {amenities.map((a) => {
+                const active = features.includes(a.id);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => toggleFeature(a.id)}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-3 text-left text-sm font-medium transition ${
+                      active
+                        ? "border-accent bg-accent/10 text-accent-dark"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${
+                        active ? "border-accent bg-accent text-white" : "border-slate-300"
+                      }`}
+                    >
+                      {active ? "✓" : ""}
+                    </span>
+                    <span className="text-lg leading-none">{a.icon || "•"}</span>
+                    <span>{a.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
       </Card>
 
       <Card title="Rota & Konaklama (Harita)">

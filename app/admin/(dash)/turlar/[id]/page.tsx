@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import TourForm, { TourFormValues } from "@/components/admin/TourForm";
 import { updateTour } from "@/lib/admin-actions";
+import { getActiveAmenities } from "@/lib/tours";
 import { prisma } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -29,10 +30,13 @@ export default async function EditTourPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const t = await prisma.tour.findUnique({
-    where: { id },
-    include: { places: { orderBy: { sortOrder: "asc" } } },
-  });
+  const [t, amenities] = await Promise.all([
+    prisma.tour.findUnique({
+      where: { id },
+      include: { places: { orderBy: { sortOrder: "asc" } } },
+    }),
+    getActiveAmenities(),
+  ]);
   if (!t) notFound();
 
   const initial: TourFormValues = {
@@ -53,6 +57,7 @@ export default async function EditTourPage({
     capacity: t.capacity ?? undefined,
     vehicleType: t.vehicleType ?? undefined,
     seatRows: t.seatRows ?? undefined,
+    features: JSON.parse(t.features || "[]"),
     status: t.status,
     places: t.places.map((p) => ({
       type: p.type === "OTEL" ? ("OTEL" as const) : ("DURAK" as const),
@@ -68,7 +73,7 @@ export default async function EditTourPage({
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="mb-6 text-2xl font-bold text-brand">Turu Düzenle</h1>
-      <TourForm action={action} initial={initial} submitLabel="Değişiklikleri Kaydet" />
+      <TourForm action={action} initial={initial} submitLabel="Değişiklikleri Kaydet" amenities={amenities} />
     </div>
   );
 }

@@ -30,6 +30,17 @@ export interface Tour {
   soldSeats?: string[]; // müsait olmayan (satılı veya kilitli) koltuklar
   seatGenders?: Record<string, Gender>; // dolu koltuk → cinsiyet
   places?: TourPlace[];
+  features: string[]; // seçili özellik id'leri
+  amenities?: Amenity[]; // çözümlenmiş özellik nesneleri (detay sayfası için)
+}
+
+// Tura eklenebilecek özellik/hizmet (Konaklama, Kahvaltı, Rehber…).
+export interface Amenity {
+  id: string;
+  name: string;
+  icon: string; // emoji (opsiyonel)
+  active: boolean;
+  sortOrder: number;
 }
 
 export type VehicleType = "OTOBUS" | "VIP" | "MINIBUS";

@@ -46,3 +46,6 @@ next-env.d.ts
 .env
 dev.db
 /public/uploads
+
+# Python sanal ortamı (yerel, build'e dahil değil)
+.venv/

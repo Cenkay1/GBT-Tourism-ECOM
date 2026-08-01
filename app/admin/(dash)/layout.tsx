@@ -46,7 +46,7 @@ export default async function AdminLayout({
           <div className="border-b border-slate-200 bg-white px-4 py-2 md:hidden">
             <AdminNav mobile />
           </div>
-          <main className="p-6">{children}</main>
+          <main className="p-4 sm:p-6">{children}</main>
         </div>
       </div>
     </div>

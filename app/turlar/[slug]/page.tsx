@@ -34,24 +34,29 @@ export default async function TourDetail({
         <span className="text-brand">{tour.title}</span>
       </nav>
 
-      {/* Galeri — afiş boyutunda yatay kaydırmalı şerit */}
-      <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {(tour.images.length ? tour.images : [tour.coverImage]).map((im, i) => (
-          <div
-            key={i}
-            className="w-[80%] shrink-0 snap-start sm:w-[55%] md:w-[42%] lg:w-[32%]"
-          >
-            <div className="aspect-[4/5] w-full overflow-hidden rounded-3xl bg-slate-100 shadow-md ring-1 ring-black/5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={im}
-                alt={`${tour.title} ${i + 1}`}
-                className="h-full w-full object-cover"
-              />
-            </div>
+      {/* Galeri — afiş boyutunda, ortalı; görsel sayısına göre uyumlu */}
+      {(() => {
+        const gallery = tour.images.length ? tour.images : [tour.coverImage];
+        return (
+          <div className="flex flex-wrap justify-center gap-4">
+            {gallery.map((im, i) => (
+              <div
+                key={i}
+                className="w-full max-w-[300px] sm:w-[280px] md:w-[300px]"
+              >
+                <div className="aspect-[4/5] w-full overflow-hidden rounded-3xl bg-slate-100 shadow-md ring-1 ring-black/5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={im}
+                    alt={`${tour.title} ${i + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
       {/* Başlık + bilgi */}
       <div className="mt-6 grid gap-8 md:grid-cols-[1fr_auto] md:items-start">
@@ -87,16 +92,35 @@ export default async function TourDetail({
             <p className="mt-2 leading-relaxed text-slate-600">{tour.description}</p>
           </div>
 
-          <div className="mt-6">
-            <h2 className="text-lg font-bold text-brand">Öne Çıkanlar</h2>
-            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-              {tour.highlights.map((h) => (
-                <li key={h} className="flex items-center gap-2 text-sm text-slate-600">
-                  <span className="text-accent">✓</span> {h}
-                </li>
-              ))}
-            </ul>
-          </div>
+          {tour.highlights.length > 0 && (
+            <div className="mt-6">
+              <h2 className="text-lg font-bold text-brand">Öne Çıkanlar</h2>
+              <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                {tour.highlights.map((h) => (
+                  <li key={h} className="flex items-center gap-2 text-sm text-slate-600">
+                    <span className="text-accent">✓</span> {h}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {tour.amenities && tour.amenities.length > 0 && (
+            <div className="mt-6">
+              <h2 className="text-lg font-bold text-brand">Fiyata Dahil</h2>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {tour.amenities.map((a) => (
+                  <span
+                    key={a.id}
+                    className="flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1.5 text-sm font-medium text-accent-dark"
+                  >
+                    <span className="text-base leading-none">{a.icon || "✓"}</span>
+                    {a.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl bg-brand p-6 text-white md:sticky md:top-24 md:w-72">

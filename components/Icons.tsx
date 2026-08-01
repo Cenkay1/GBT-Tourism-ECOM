@@ -72,6 +72,19 @@ export const ShieldIcon = (p: P) => (
   </svg>
 );
 
+export const CheckIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="m5 13 4 4L19 7" />
+  </svg>
+);
+
+export const CheckCircleIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+    <path d="m9 11 3 3L22 4" />
+  </svg>
+);
+
 export const TicketIcon = (p: P) => (
   <svg {...base(p)}>
     <path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z" />

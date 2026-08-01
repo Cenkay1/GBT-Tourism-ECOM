@@ -50,12 +50,22 @@ function optNum(fd: FormData, k: string): number | null {
 
 // ---- TUR ----
 
+function parseIdList(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function tourDataFromForm(fd: FormData) {
   const bookingType = str(fd, "bookingType");
   const images = str(fd, "images")
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
+  const features = parseIdList(str(fd, "features"));
   const highlights = str(fd, "highlights")
     .split("\n")
     .map((s) => s.trim())
@@ -88,6 +98,7 @@ async function tourDataFromForm(fd: FormData) {
     vehicleType,
     seatLayout,
     seatRows: bookingType === "KOLTUK" ? optNum(fd, "seatRows") : null,
+    features: JSON.stringify(features),
     status: str(fd, "status") || "YAYINDA",
   };
 }
@@ -219,6 +230,39 @@ export async function toggleBanner(id: string, active: boolean) {
   await prisma.banner.update({ where: { id }, data: { active } });
   revalidatePath("/");
   revalidatePath("/admin/afisler");
+}
+
+// ---- ÖZELLİKLER (AMENITY) ----
+
+export async function createAmenity(fd: FormData) {
+  await requireAdmin();
+  const name = str(fd, "name");
+  if (!name) redirect("/admin/ozellikler");
+  await prisma.amenity.create({
+    data: {
+      name,
+      icon: str(fd, "icon"),
+      sortOrder: num(fd, "sortOrder"),
+      active: fd.get("active") === "on",
+    },
+  });
+  revalidatePath("/admin/ozellikler");
+  revalidatePath("/admin/turlar");
+  redirect("/admin/ozellikler");
+}
+
+export async function deleteAmenity(id: string) {
+  await requireAdmin();
+  await prisma.amenity.delete({ where: { id } });
+  revalidatePath("/admin/ozellikler");
+  revalidatePath("/admin/turlar");
+}
+
+export async function toggleAmenity(id: string, active: boolean) {
+  await requireAdmin();
+  await prisma.amenity.update({ where: { id }, data: { active } });
+  revalidatePath("/admin/ozellikler");
+  revalidatePath("/admin/turlar");
 }
 
 // ---- REZERVASYON ----

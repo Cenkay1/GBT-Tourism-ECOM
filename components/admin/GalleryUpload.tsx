@@ -120,9 +120,9 @@ export default function GalleryUpload({
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
+          className="rounded-lg bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-dark disabled:opacity-50"
         >
-          {busy ? "Yükleniyor…" : "Bilgisayardan Seç (çoklu)"}
+          {busy ? "Yükleniyor…" : "Görsel Seç (çoklu)"}
         </button>
         <input
           ref={linkRef}
