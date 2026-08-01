@@ -220,8 +220,10 @@ export async function createPendingBooking(
 // Ödeme başarılı: koltukları SATILDI yap, rezervasyonu ODENDI yap.
 export async function markBookingPaid(
   bookingId: string,
-  paymentRef: string
+  paymentRef: string,
+  opts?: { notify?: boolean; paymentMethod?: string }
 ): Promise<{ ok: boolean; error?: string }> {
+  const notify = opts?.notify ?? true;
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
     include: { passengers: true },
@@ -240,7 +242,11 @@ export async function markBookingPaid(
   await prisma.$transaction([
     prisma.booking.update({
       where: { id: bookingId },
-      data: { status: "ODENDI", paymentRef },
+      data: {
+        status: "ODENDI",
+        paymentRef,
+        ...(opts?.paymentMethod ? { paymentMethod: opts.paymentMethod } : {}),
+      },
     }),
     ...(seatCodes.length
       ? [
@@ -253,13 +259,53 @@ export async function markBookingPaid(
   ]);
 
   // Onay bildirimi (SMS + e-posta) — best-effort, ödemeyi bloklamaz.
-  try {
-    const { sendBookingConfirmation } = await import("@/lib/notifications");
-    await sendBookingConfirmation(bookingId);
-  } catch (e) {
-    console.error("[Onay bildirimi hatası]", e);
+  if (notify) {
+    try {
+      const { sendBookingConfirmation } = await import("@/lib/notifications");
+      await sendBookingConfirmation(bookingId);
+    } catch (e) {
+      console.error("[Onay bildirimi hatası]", e);
+    }
   }
   return { ok: true };
+}
+
+// Admin elden/nakit satış: rezervasyonu oluştur, anında ODENDI + koltukları SATILDI yap.
+// Koltuk kilitleme / kontenjan / cinsiyet doğrulaması createPendingBooking'ten gelir.
+export async function createManualPaidBooking(
+  input: CreateBookingInput & { totalOverride?: number | null }
+): Promise<CreateResult> {
+  const created = await createPendingBooking(input);
+  if (!created.ok) return created;
+
+  const paid = await markBookingPaid(created.bookingId, "NAKIT", {
+    notify: false,
+    paymentMethod: "NAKIT",
+  });
+  if (!paid.ok) {
+    // Ödeme işaretlenemezse kilitli koltukları serbest bırak.
+    await cancelBooking(created.bookingId);
+    return { ok: false, error: paid.error ?? "Satış kaydedilemedi." };
+  }
+
+  // İsteğe bağlı elle tutar (indirim/pazarlık).
+  if (
+    input.totalOverride != null &&
+    Number.isFinite(input.totalOverride) &&
+    input.totalOverride >= 0
+  ) {
+    await prisma.booking.update({
+      where: { id: created.bookingId },
+      data: { totalAmount: Math.round(input.totalOverride) },
+    });
+    return {
+      ok: true,
+      bookingId: created.bookingId,
+      amount: Math.round(input.totalOverride),
+    };
+  }
+
+  return created;
 }
 
 // Ödeme iptal/başarısız: koltukları serbest bırak, rezervasyonu iptal et.

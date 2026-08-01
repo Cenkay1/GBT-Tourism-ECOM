@@ -34,11 +34,7 @@ function verifyToken(token: string | undefined): string | null {
   }
 }
 
-export async function login(email: string, password: string): Promise<boolean> {
-  const user = await prisma.adminUser.findUnique({ where: { email } });
-  if (!user) return false;
-  if (user.passwordHash !== sha256(password)) return false;
-
+async function startSession(email: string) {
   const store = await cookies();
   store.set(COOKIE, makeToken(email), {
     httpOnly: true,
@@ -46,6 +42,23 @@ export async function login(email: string, password: string): Promise<boolean> {
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 gün
   });
+}
+
+export async function login(email: string, password: string): Promise<boolean> {
+  // 1) .env tabanlı admin — seed'e gerek kalmadan giriş (canlıda pratik).
+  const envEmail = process.env.ADMIN_EMAIL;
+  const envPassword = process.env.ADMIN_PASSWORD;
+  if (envEmail && envPassword && email === envEmail && password === envPassword) {
+    await startSession(email);
+    return true;
+  }
+
+  // 2) Veritabanındaki admin kullanıcıları (mevcut davranış).
+  const user = await prisma.adminUser.findUnique({ where: { email } });
+  if (!user) return false;
+  if (user.passwordHash !== sha256(password)) return false;
+
+  await startSession(email);
   return true;
 }
 

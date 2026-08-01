@@ -34,25 +34,23 @@ export default async function TourDetail({
         <span className="text-brand">{tour.title}</span>
       </nav>
 
-      {/* Galeri */}
-      <div className="grid gap-3 md:grid-cols-[2fr_1fr]">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={tour.images[0]}
-          alt={tour.title}
-          className="h-72 w-full rounded-2xl object-cover md:h-96"
-        />
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-1">
-          {tour.images.slice(1, 3).map((im, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={i}
-              src={im}
-              alt={`${tour.title} ${i + 2}`}
-              className="h-[calc(9rem-0.375rem)] w-full rounded-2xl object-cover md:h-[calc(12rem-0.375rem)]"
-            />
-          ))}
-        </div>
+      {/* Galeri — afiş boyutunda yatay kaydırmalı şerit */}
+      <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {(tour.images.length ? tour.images : [tour.coverImage]).map((im, i) => (
+          <div
+            key={i}
+            className="w-[80%] shrink-0 snap-start sm:w-[55%] md:w-[42%] lg:w-[32%]"
+          >
+            <div className="aspect-[4/5] w-full overflow-hidden rounded-3xl bg-slate-100 shadow-md ring-1 ring-black/5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={im}
+                alt={`${tour.title} ${i + 1}`}
+                className="h-full w-full object-cover"
+              />
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Başlık + bilgi */}

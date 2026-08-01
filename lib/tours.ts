@@ -107,6 +107,53 @@ function toTour(
   };
 }
 
+export async function getTourById(id: string): Promise<Tour | null> {
+  // Önce süresi dolan geçici koltuk kilitlerini serbest bırak.
+  await releaseExpiredHolds();
+
+  const row = await prisma.tour.findUnique({
+    where: { id },
+    include: { seats: true, places: { orderBy: { sortOrder: "asc" } } },
+  });
+  if (!row) return null;
+
+  const takenSeatRows = row.seats.filter((s) => s.status !== "BOS");
+  const takenSeats = takenSeatRows.map((s) => s.code);
+  const seatGenders: Record<string, Gender> = {};
+  for (const s of takenSeatRows) {
+    if (s.gender === "E" || s.gender === "K") seatGenders[s.code] = s.gender;
+  }
+
+  let soldCount: number | undefined;
+  if (row.bookingType === "KONTENJAN") {
+    const active = await prisma.booking.findMany({
+      where: {
+        tourId: row.id,
+        OR: [{ status: "ODENDI" }, { status: "BEKLIYOR" }],
+      },
+      select: { quantity: true },
+    });
+    soldCount = active.reduce((sum, b) => sum + b.quantity, 0);
+  }
+
+  const places: TourPlace[] = (row.places ?? []).map((p) => ({
+    id: p.id,
+    type: p.type as PlaceType,
+    name: p.name,
+    address: p.address ?? undefined,
+    mapQuery: p.mapQuery ?? undefined,
+    nights: p.nights ?? undefined,
+    sortOrder: p.sortOrder,
+  }));
+
+  return toTour(row as TourRow, {
+    soldSeats: takenSeats,
+    seatGenders,
+    sold: soldCount,
+    places,
+  });
+}
+
 export async function getPublishedTours(filters?: {
   category?: Category;
   q?: string;

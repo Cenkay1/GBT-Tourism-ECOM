@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ImageUpload from "@/components/admin/ImageUpload";
+import GalleryUpload from "@/components/admin/GalleryUpload";
 import PlacesEditor, { PlaceRow } from "@/components/admin/PlacesEditor";
 import MapField from "@/components/admin/MapField";
 
@@ -152,10 +153,14 @@ export default function TourForm({
           label="Kapak Görseli"
           hint="Bilgisayardan yükleyin veya bağlantı yapıştırın."
         />
-        <label className={`${label} mt-4`}>
-          Galeri Görselleri (her satıra bir URL)
-          <textarea name="images" rows={3} defaultValue={initial?.images} className={input} placeholder={"https://...\nhttps://..."} />
-        </label>
+        <div className="mt-4">
+          <GalleryUpload
+            name="images"
+            defaultValue={initial?.images}
+            label="Galeri Görselleri"
+            hint="Birden fazla görsel yükleyebilirsiniz; hepsi afiş boyutunda yan yana gösterilir."
+          />
+        </div>
         <label className={`${label} mt-4`}>
           Açıklama
           <textarea name="description" rows={4} defaultValue={initial?.description} className={input} />

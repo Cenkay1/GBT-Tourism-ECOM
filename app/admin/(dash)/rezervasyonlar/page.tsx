@@ -16,6 +16,11 @@ const statusLabel: Record<string, string> = {
   IPTAL: "İptal",
   SURE_DOLDU: "Süre Doldu",
 };
+const payLabel: Record<string, string> = { NAKIT: "Nakit", ONLINE: "Online" };
+const payStyle: Record<string, string> = {
+  NAKIT: "bg-amber-50 text-amber-700",
+  ONLINE: "bg-sky-50 text-sky-700",
+};
 
 export default async function AdminBookings() {
   const bookings = await prisma.booking.findMany({
@@ -25,10 +30,20 @@ export default async function AdminBookings() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-brand">Rezervasyonlar & Satışlar</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Gelen tüm rezervasyon ve satış kayıtları.
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-brand">Rezervasyonlar & Satışlar</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Gelen tüm rezervasyon ve satış kayıtları.
+          </p>
+        </div>
+        <Link
+          href="/admin/rezervasyonlar/yeni"
+          className="rounded-lg bg-accent px-4 py-2.5 text-sm font-bold text-white hover:bg-accent-dark"
+        >
+          + Elden Satış Ekle
+        </Link>
+      </div>
 
       <div className="mt-6 overflow-hidden rounded-2xl bg-white shadow-sm">
         <div className="overflow-x-auto">
@@ -40,6 +55,7 @@ export default async function AdminBookings() {
                 <th className="px-4 py-3">Koltuk/Kişi</th>
                 <th className="px-4 py-3">Tutar</th>
                 <th className="px-4 py-3">Durum</th>
+                <th className="px-4 py-3">Ödeme</th>
                 <th className="px-4 py-3">Tarih</th>
                 <th className="px-4 py-3 text-right">Detay</th>
               </tr>
@@ -47,7 +63,7 @@ export default async function AdminBookings() {
             <tbody className="divide-y divide-slate-100">
               {bookings.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
                     Henüz rezervasyon yok. Ödeme entegrasyonu bağlandığında satışlar burada
                     listelenecek.
                   </td>
@@ -75,6 +91,15 @@ export default async function AdminBookings() {
                         }`}
                       >
                         {statusLabel[b.status] ?? b.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          payStyle[b.paymentMethod] ?? "bg-slate-100 text-slate-500"
+                        }`}
+                      >
+                        {payLabel[b.paymentMethod] ?? b.paymentMethod}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-500">

@@ -73,6 +73,7 @@ model Booking {
   contactPhone  String
   contactEmail  String
   quantity      Int       @default(1)
+  paymentMethod  String    @default("ONLINE") // ONLINE | NAKIT
   paymentRef     String?
   holdExpiresAt  DateTime?
   reminderSentAt DateTime? // 24s öncesi hatırlatma gönderildi mi

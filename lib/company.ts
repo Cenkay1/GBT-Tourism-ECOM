@@ -2,8 +2,8 @@
 export const COMPANY = {
   name: "Gözdem Burak Turizm",
   tagline: "Karadeniz Ereğli'nin En Büyük Seyahat Acentası",
-  phones: ["+90 532 412 41 60", "+90 536 612 67 35", "+90 372 322 41 75"],
-  emails: ["eregligozdemburaktur@hotmail.com", "hy.67@hotmail.com"],
+  phones: ["+90 536 612 67 35"],
+  emails: ["info@gozdemburakturizm.com"],
   address: "Müftü, Yazar İlhami Sosyal Sk. No:42/1, 67300 Ereğli/Zonguldak",
   mapQuery: "Gözdem Burak Turizm, Yazar İlhami Sosyal Sk. No:42, Ereğli, Zonguldak",
   social: {
