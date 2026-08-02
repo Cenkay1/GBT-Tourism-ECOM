@@ -33,12 +33,16 @@ export default function CheckoutForm({
   quantity,
   action,
   summary,
+  boardingPlaceId,
+  boardingLabel,
 }: {
   tour: CheckoutTour;
   seats: SeatPick[];
   quantity: number;
   action: (fd: FormData) => void;
   summary: CheckoutSummary;
+  boardingPlaceId?: string;
+  boardingLabel?: string;
 }) {
   const isSeat = tour.bookingType === "KOLTUK";
   const count = isSeat ? seats.length : quantity;
@@ -97,6 +101,7 @@ export default function CheckoutForm({
       <input type="hidden" name="bookingType" value={tour.bookingType} />
       <input type="hidden" name="seatCodes" value={isSeat ? seats.map((s) => s.code).join(",") : ""} />
       <input type="hidden" name="quantity" value={String(quantity)} />
+      {boardingPlaceId && <input type="hidden" name="boardingPlaceId" value={boardingPlaceId} />}
       {genders.map((g, i) => (
         <input key={i} type="hidden" name={`p_${i}_gender`} value={g} />
       ))}
@@ -195,6 +200,9 @@ export default function CheckoutForm({
           <p className="font-semibold text-slate-800">{summary.title}</p>
           <p className="text-xs text-slate-400">{summary.destination}</p>
           <p className="mt-1 text-xs text-slate-500">Kalkış: {summary.departureLabel}</p>
+          {boardingLabel && (
+            <p className="text-xs text-slate-500">Biniş: {boardingLabel}</p>
+          )}
         </div>
         <div className="mt-3 space-y-1 text-sm text-slate-500">
           {isSeat ? (

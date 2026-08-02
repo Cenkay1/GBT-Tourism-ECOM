@@ -12,6 +12,7 @@ import {
   genderLabel,
 } from "@/lib/shared";
 import { BusIcon } from "@/components/Icons";
+import BoardingSelector from "@/components/BoardingSelector";
 
 const MAX_SEATS = 6;
 
@@ -30,13 +31,21 @@ export default function SeatMap({ tour }: { tour: Tour }) {
   const layout = tour.seatLayout ?? "2+2";
   const takenGenders = tour.seatGenders ?? {};
 
+  // Biniş durakları (varsa) — seçime göre kişi başı fiyat değişir.
+  const stops = (tour.places ?? []).filter((p) => p.type === "DURAK");
+  const [boardingId, setBoardingId] = useState<string | null>(
+    stops.length ? stops[0].id : null
+  );
+  const boardingStop = stops.find((s) => s.id === boardingId);
+  const unitPrice = boardingStop?.price ?? tour.price;
+
   function isSelected(code: string) {
     return selected.some((s) => s.code === code);
   }
 
   function onSeatClick(code: string, status: string) {
     setWarning("");
-    if (status === "SATILDI") return;
+    if (status === "SATILDI" || status === "BLOKE") return;
     if (isSelected(code)) {
       setSelected((prev) => prev.filter((s) => s.code !== code));
       return;
@@ -75,15 +84,19 @@ export default function SeatMap({ tour }: { tour: Tour }) {
   function goToCheckout() {
     const koltuklar = selected.map((s) => `${s.code}:${s.gender}`).join(",");
     const params = new URLSearchParams({ tur: tour.slug, koltuklar });
+    if (boardingId) params.set("durak", boardingId);
     router.push(`/rezervasyon?${params}`);
   }
 
-  const total = selected.length * tour.price;
+  const total = selected.length * unitPrice;
 
   function seatClasses(code: string, status: string, gender?: Gender | null) {
     if (isSelected(code)) {
       const g = selected.find((s) => s.code === code)!.gender;
       return g === "K" ? "bg-pink-600 text-white" : "bg-blue-600 text-white";
+    }
+    if (status === "BLOKE") {
+      return "cursor-not-allowed bg-slate-200 text-slate-400 line-through";
     }
     if (status === "SATILDI") {
       if (gender === "K") return "cursor-not-allowed bg-pink-200 text-pink-700";
@@ -94,7 +107,17 @@ export default function SeatMap({ tour }: { tour: Tour }) {
   }
 
   return (
-    <div className="grid gap-6 md:grid-cols-[1fr_260px]">
+    <div className="space-y-6">
+      {stops.length > 0 && (
+        <BoardingSelector
+          places={tour.places ?? []}
+          value={boardingId}
+          onChange={setBoardingId}
+          basePrice={tour.price}
+          currency={tour.currency}
+        />
+      )}
+      <div className="grid gap-6 md:grid-cols-[1fr_260px]">
       {/* Araç şeması */}
       <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
         <div className="mb-4 flex items-center justify-between">
@@ -127,9 +150,11 @@ export default function SeatMap({ tour }: { tour: Tour }) {
                     <button
                       key={c}
                       onClick={() => onSeatClick(seat.code, seat.status)}
-                      disabled={seat.status === "SATILDI"}
+                      disabled={seat.status === "SATILDI" || seat.status === "BLOKE"}
                       title={
-                        seat.status === "SATILDI"
+                        seat.status === "BLOKE"
+                          ? `${seat.code} — satışa kapalı`
+                          : seat.status === "SATILDI"
                           ? `${seat.code} — dolu${seat.gender ? " (" + genderLabel(seat.gender) + ")" : ""}`
                           : seat.code
                       }
@@ -148,6 +173,7 @@ export default function SeatMap({ tour }: { tour: Tour }) {
           <Legend className="bg-emerald-100" label="Boş" />
           <Legend className="bg-blue-200" label="Erkek (dolu)" />
           <Legend className="bg-pink-200" label="Kadın (dolu)" />
+          <Legend className="bg-slate-200" label="Kapalı" />
           <Legend className="bg-blue-600" label="Seçtiğiniz" />
         </div>
       </div>
@@ -175,7 +201,8 @@ export default function SeatMap({ tour }: { tour: Tour }) {
         </div>
         <div className="mt-4 space-y-1 border-t border-slate-100 pt-4 text-sm">
           <Row label="Koltuk" value={`${selected.length} adet`} />
-          <Row label="Kişi başı" value={formatPrice(tour.price, tour.currency)} />
+          {boardingStop && <Row label="Biniş" value={boardingStop.name} />}
+          <Row label="Kişi başı" value={formatPrice(unitPrice, tour.currency)} />
           <div className="flex items-center justify-between pt-2 text-base font-extrabold text-brand">
             <span>Toplam</span>
             <span className="text-accent">{formatPrice(total, tour.currency)}</span>
@@ -227,6 +254,7 @@ export default function SeatMap({ tour }: { tour: Tour }) {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ function s(fd: FormData, k: string): string {
 export async function submitCheckout(fd: FormData) {
   const tourId = s(fd, "tourId");
   const bookingType = s(fd, "bookingType");
+  const boardingPlaceId = s(fd, "boardingPlaceId") || undefined;
   const seatCodes = s(fd, "seatCodes")
     ? s(fd, "seatCodes").split(",").map((c) => c.trim()).filter(Boolean)
     : [];
@@ -41,6 +42,7 @@ export async function submitCheckout(fd: FormData) {
     passengers,
     seatCodes: bookingType === "KOLTUK" ? seatCodes : undefined,
     quantity: bookingType === "KONTENJAN" ? quantity : undefined,
+    boardingPlaceId,
   });
 
   if (!result.ok) {

@@ -10,12 +10,18 @@ export const dynamic = "force-dynamic";
 export default async function CheckoutPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tur?: string; koltuklar?: string; adet?: string }>;
+  searchParams: Promise<{ tur?: string; koltuklar?: string; adet?: string; durak?: string }>;
 }) {
-  const { tur, koltuklar, adet } = await searchParams;
+  const { tur, koltuklar, adet, durak } = await searchParams;
   if (!tur) notFound();
   const tour = await getTourBySlug(tur);
   if (!tour) notFound();
+
+  // Biniş durağı (varsa) → kişi başı fiyat buradan belirlenir.
+  const boardingStop = durak
+    ? (tour.places ?? []).find((p) => p.id === durak && p.type === "DURAK")
+    : undefined;
+  const unitPrice = boardingStop?.price ?? tour.price;
 
   // "5A:E,5B:K" → [{code:"5A",gender:"E"}, ...]
   const seats =
@@ -50,7 +56,7 @@ export default async function CheckoutPage({
   }
 
   const count = tour.bookingType === "KOLTUK" ? seats.length : quantity;
-  const total = tour.price * count;
+  const total = unitPrice * count;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -70,11 +76,13 @@ export default async function CheckoutPage({
           seats={seats}
           quantity={quantity}
           action={submitCheckout}
+          boardingPlaceId={boardingStop?.id}
+          boardingLabel={boardingStop?.name}
           summary={{
             title: tour.title,
             destination: tour.destination,
             departureLabel: formatDate(tour.departureDate),
-            priceLabel: formatPrice(tour.price, tour.currency),
+            priceLabel: formatPrice(unitPrice, tour.currency),
             totalLabel: formatPrice(total, tour.currency),
           }}
         />

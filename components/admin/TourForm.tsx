@@ -28,6 +28,7 @@ export interface TourFormValues {
   status?: string;
   places?: PlaceRow[];
   features?: string[];
+  excludedFeatures?: string[];
 }
 
 export default function TourForm({
@@ -43,11 +44,21 @@ export default function TourForm({
 }) {
   const [bookingType, setBookingType] = useState(initial?.bookingType ?? "KOLTUK");
   const [features, setFeatures] = useState<string[]>(initial?.features ?? []);
+  const [excluded, setExcluded] = useState<string[]>(initial?.excludedFeatures ?? []);
 
   function toggleFeature(id: string) {
     setFeatures((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     );
+    // Bir özellik hem dahil hem hariç olamaz.
+    setExcluded((prev) => prev.filter((x) => x !== id));
+  }
+
+  function toggleExcluded(id: string) {
+    setExcluded((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+    setFeatures((prev) => prev.filter((x) => x !== id));
   }
 
   const input =
@@ -228,9 +239,56 @@ export default function TourForm({
         )}
       </Card>
 
+      <Card title="Fiyata Dahil Olmayanlar">
+        <input type="hidden" name="excludedFeatures" value={JSON.stringify(excluded)} />
+        {amenities.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            Önce{" "}
+            <a href="/admin/ozellikler" className="font-medium text-brand underline">
+              Özellikler
+            </a>{" "}
+            sayfasından hizmet tanımlayın.
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-slate-400">
+              Fiyata dahil OLMAYAN hizmetleri işaretleyin. Tur sayfasında “Fiyata Dahil Değil” olarak görünür.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {amenities.map((a) => {
+                const active = excluded.includes(a.id);
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => toggleExcluded(a.id)}
+                    className={`flex items-center gap-2 rounded-xl border px-3 py-3 text-left text-sm font-medium transition ${
+                      active
+                        ? "border-red-300 bg-red-50 text-red-700"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${
+                        active ? "border-red-400 bg-red-500 text-white" : "border-slate-300"
+                      }`}
+                    >
+                      {active ? "✕" : ""}
+                    </span>
+                    <span className="text-lg leading-none">{a.icon || "•"}</span>
+                    <span>{a.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Card>
+
       <Card title="Rota & Konaklama (Harita)">
         <p className="mb-3 text-xs text-slate-400">
           Turun durakları ve (konaklamalıysa) otelleri. Her biri tur sayfasında haritada gösterilir.
+          Her durağa <strong>biniş fiyatı</strong> girebilirsiniz; müşteri o duraktan binmeyi seçince o fiyat uygulanır (boş bırakılırsa tur fiyatı geçerli).
         </p>
         <PlacesEditor name="places" initial={initial?.places} />
       </Card>

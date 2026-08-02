@@ -82,6 +82,14 @@ export default async function AdminTours() {
                       >
                         Excel
                       </a>
+                      {t.bookingType === "KOLTUK" && (
+                        <Link
+                          href={`/admin/turlar/${t.id}/koltuklar`}
+                          className="rounded-md px-3 py-1.5 text-xs font-semibold text-brand hover:bg-slate-100"
+                        >
+                          Koltuklar
+                        </Link>
+                      )}
                       <Link
                         href={`/admin/turlar/${t.id}`}
                         className="rounded-md px-3 py-1.5 text-xs font-semibold text-brand hover:bg-slate-100"

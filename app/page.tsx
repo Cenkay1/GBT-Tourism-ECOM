@@ -38,17 +38,17 @@ export default async function Home() {
               "radial-gradient(circle at 20% 20%, rgba(255,255,255,.35), transparent 40%), radial-gradient(circle at 80% 0%, rgba(106,31,52,.6), transparent 45%)",
           }}
         />
-        <div className="relative mx-auto max-w-3xl px-4 py-14 text-center md:py-20">
-          <h1 className="text-3xl font-extrabold text-white md:text-4xl">
+        <div className="relative mx-auto max-w-3xl px-4 py-7 text-center md:py-16">
+          <h1 className="text-xl font-extrabold text-white sm:text-2xl md:text-4xl">
             Hayalinizdeki tura çıkın
           </h1>
-          <p className="mx-auto mt-2 max-w-xl text-sm text-white/80 md:text-base">
+          <p className="mx-auto mt-1.5 max-w-xl text-xs text-white/80 sm:text-sm md:text-base">
             Yurt içi ve yurt dışı turlarımız arasında arayın; online koltuk seçin, güvenle ödeyin.
           </p>
 
           <form
             action="/turlar"
-            className="mx-auto mt-7 flex max-w-2xl flex-col gap-3 rounded-2xl bg-white p-2.5 shadow-xl sm:flex-row sm:items-center"
+            className="mx-auto mt-4 flex max-w-2xl flex-col gap-3 rounded-2xl bg-white p-2.5 shadow-xl sm:mt-6 sm:flex-row sm:items-center"
           >
             <div className="relative flex-1">
               <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">

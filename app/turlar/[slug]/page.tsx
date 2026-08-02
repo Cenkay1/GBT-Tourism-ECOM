@@ -156,6 +156,23 @@ export default async function TourDetail({
               </div>
             </div>
           )}
+
+          {tour.excludedAmenities && tour.excludedAmenities.length > 0 && (
+            <div className="mt-6">
+              <h2 className="text-lg font-bold text-brand">Fiyata Dahil Değil</h2>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {tour.excludedAmenities.map((a) => (
+                  <span
+                    key={a.id}
+                    className="flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-500"
+                  >
+                    <span className="text-base leading-none text-red-500">✕</span>
+                    {a.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-2xl bg-brand p-6 text-white md:sticky md:top-24 md:w-72">

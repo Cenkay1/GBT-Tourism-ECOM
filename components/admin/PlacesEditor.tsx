@@ -10,6 +10,7 @@ export interface PlaceRow {
   address?: string;
   mapQuery?: string;
   nights?: number;
+  price?: number; // DURAK için biniş noktası bazlı kişi başı fiyat
 }
 
 export default function PlacesEditor({
@@ -97,6 +98,17 @@ export default function PlacesEditor({
                   onChange={(e) => update(i, { nights: Number(e.target.value) || undefined })}
                   placeholder="Gece"
                   className={`${input} w-24`}
+                />
+              )}
+              {row.type === "DURAK" && (
+                <input
+                  type="number"
+                  min={0}
+                  value={row.price ?? ""}
+                  onChange={(e) => update(i, { price: Number(e.target.value) || undefined })}
+                  placeholder="Fiyat ₺"
+                  title="Bu duraktan binenler için kişi başı fiyat (boş bırakılırsa tur fiyatı geçerli)"
+                  className={`${input} w-28`}
                 />
               )}
               <button

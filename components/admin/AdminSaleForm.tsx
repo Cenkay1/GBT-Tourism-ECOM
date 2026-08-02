@@ -79,6 +79,8 @@ export default function AdminSaleForm({
     if (status === "SATILDI") return "bg-slate-300 text-slate-500 cursor-not-allowed";
     const picked = rows.find((r) => r.seatCode === code);
     if (picked) return "bg-accent text-white ring-2 ring-accent";
+    // Kapalı (BLOKE) koltuk: online satışa kapalı ama acente elden satabilir.
+    if (status === "BLOKE") return "bg-red-100 text-red-700 ring-1 ring-red-300 hover:bg-red-200";
     return "bg-emerald-50 text-emerald-700 hover:bg-emerald-100";
   }
 
@@ -126,7 +128,7 @@ export default function AdminSaleForm({
               </div>
             ))}
             <p className="pt-2 text-center text-xs text-slate-400">
-              Yeşil: boş · Turuncu: seçili · Gri: dolu
+              Yeşil: boş · Turuncu: seçili · Kırmızı: kapalı (elden satılabilir) · Gri: dolu
             </p>
           </div>
         ) : (

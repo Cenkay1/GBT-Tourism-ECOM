@@ -13,7 +13,7 @@ export default function TourCard({ tour }: { tour: Tour }) {
       href={`/turlar/${tour.slug}`}
       className="group overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-black/5 transition hover:-translate-y-1 hover:shadow-lg"
     >
-      <div className="relative aspect-[16/10] overflow-hidden">
+      <div className="relative aspect-[4/5] overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={tour.coverImage}

@@ -1,29 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useRef } from "react";
 import { Banner } from "@/lib/shared";
 import { ChevronRightIcon } from "@/components/Icons";
 
-// Afişler Instagram gönderi formatında (4:5) yatay şerit halinde gösterilir.
+// Afişler (kampanyalar) yorumlar gibi kesintisiz, yavaşça kayan bir şerit halinde
+// gösterilir. Instagram gönderi formatında (4:5). Fareyle üzerine gelince durur.
 export default function BannerCarousel({ banners }: { banners: Banner[] }) {
-  const scroller = useRef<HTMLDivElement>(null);
-
   if (banners.length === 0) return null;
 
-  function scroll(dir: 1 | -1) {
-    const el = scroller.current;
-    if (!el) return;
-    el.scrollBy({ left: dir * (el.clientWidth * 0.8), behavior: "smooth" });
-  }
+  // Şeridi doldurmak için en az 4 karta tamamla, sonra kesintisiz döngü için ikiye katla.
+  let base = banners;
+  while (base.length < 4) base = [...base, ...banners];
+  const loop = [...base, ...base];
 
   return (
-    <section className="relative">
-      <div
-        ref={scroller}
-        className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {banners.map((b) => {
+    <section className="relative overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_4%,black_96%,transparent)]">
+      <div className="flex w-max gap-4 animate-[gb-marquee_50s_linear_infinite] hover:[animation-play-state:paused]">
+        {loop.map((b, i) => {
           const card = (
             <div className="group relative aspect-[4/5] w-full overflow-hidden rounded-3xl bg-slate-100 shadow-md ring-1 ring-black/5 transition duration-300 hover:shadow-xl">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -46,8 +40,8 @@ export default function BannerCarousel({ banners }: { banners: Banner[] }) {
           );
           return (
             <div
-              key={b.id}
-              className="w-[80%] shrink-0 snap-start sm:w-[55%] md:w-[42%] lg:w-[32%]"
+              key={`${b.id}-${i}`}
+              className="w-52 shrink-0 sm:w-60 md:w-64"
             >
               {b.linkUrl ? (
                 <Link href={b.linkUrl} aria-label={b.title || "Kampanya"}>
@@ -60,26 +54,6 @@ export default function BannerCarousel({ banners }: { banners: Banner[] }) {
           );
         })}
       </div>
-
-      {/* Masaüstü kaydırma okları */}
-      {banners.length > 3 && (
-        <>
-          <button
-            aria-label="Önceki"
-            onClick={() => scroll(-1)}
-            className="absolute -left-3 top-1/2 hidden h-10 w-10 -translate-y-1/2 rotate-180 items-center justify-center rounded-full bg-white shadow-md ring-1 ring-black/5 hover:bg-slate-50 md:flex"
-          >
-            <ChevronRightIcon width={20} height={20} className="text-brand" />
-          </button>
-          <button
-            aria-label="Sonraki"
-            onClick={() => scroll(1)}
-            className="absolute -right-3 top-1/2 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-md ring-1 ring-black/5 hover:bg-slate-50 md:flex"
-          >
-            <ChevronRightIcon width={20} height={20} className="text-brand" />
-          </button>
-        </>
-      )}
     </section>
   );
 }

@@ -2,7 +2,7 @@
 
 export type Category = "YURT_ICI" | "YURT_DISI";
 export type BookingType = "KOLTUK" | "KONTENJAN";
-export type SeatStatus = "BOS" | "KILITLI" | "SATILDI";
+export type SeatStatus = "BOS" | "KILITLI" | "SATILDI" | "BLOKE";
 
 export interface Tour {
   id: string;
@@ -28,10 +28,13 @@ export interface Tour {
   seatLayout?: string;
   seatRows?: number;
   soldSeats?: string[]; // müsait olmayan (satılı veya kilitli) koltuklar
+  blockedSeats?: string[]; // admin tarafından online satışa kapatılmış koltuklar (BLOKE)
   seatGenders?: Record<string, Gender>; // dolu koltuk → cinsiyet
   places?: TourPlace[];
   features: string[]; // seçili özellik id'leri
+  excludedFeatures: string[]; // fiyata dahil OLMAYAN özellik id'leri
   amenities?: Amenity[]; // çözümlenmiş özellik nesneleri (detay sayfası için)
+  excludedAmenities?: Amenity[]; // fiyata dahil olmayan çözümlenmiş özellikler
 }
 
 // Tura eklenebilecek özellik/hizmet (Konaklama, Kahvaltı, Rehber…).
@@ -83,6 +86,7 @@ export interface TourPlace {
   address?: string;
   mapQuery?: string;
   nights?: number;
+  price?: number; // DURAK için biniş noktası bazlı kişi başı fiyat
   sortOrder: number;
 }
 
@@ -165,6 +169,7 @@ export function seatNeighbor(code: string, layout: string): string | null {
 export function buildSeatGrid(tour: Tour): Seat[][] {
   if (tour.bookingType !== "KOLTUK" || !tour.seatRows) return [];
   const taken = new Set(tour.soldSeats ?? []);
+  const blocked = new Set(tour.blockedSeats ?? []);
   const genders = tour.seatGenders ?? {};
   const vt = tour.vehicleType ?? "OTOBUS";
   const { left, right } = VEHICLES[vt] ?? VEHICLES.OTOBUS;
@@ -178,9 +183,10 @@ export function buildSeatGrid(tour: Tour): Seat[][] {
       }
       const code = `${r}${c}`;
       const isTaken = taken.has(code);
+      const isBlocked = !isTaken && blocked.has(code);
       rowSeats.push({
         code,
-        status: isTaken ? "SATILDI" : "BOS",
+        status: isTaken ? "SATILDI" : isBlocked ? "BLOKE" : "BOS",
         gender: isTaken ? genders[code] ?? null : null,
       });
     }

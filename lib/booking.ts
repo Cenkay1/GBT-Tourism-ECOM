@@ -19,6 +19,8 @@ export interface CreateBookingInput {
   passengers: PassengerInput[];
   seatCodes?: string[]; // KOLTUK turları için
   quantity?: number; // KONTENJAN turları için
+  boardingPlaceId?: string; // seçilen biniş durağı (fiyatı buradan belirlenir)
+  allowBlocked?: boolean; // acente elden satışı: BLOKE koltuklar da satılabilir
 }
 
 export type CreateResult =
@@ -82,6 +84,21 @@ export async function createPendingBooking(
 
   const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
 
+  // Biniş durağı bazlı fiyat: seçilen DURAK'ın fiyatı varsa onu kullan, yoksa tur fiyatı.
+  let unitPrice = tour.price;
+  let boardingName: string | null = null;
+  if (input.boardingPlaceId) {
+    const place = await prisma.tourPlace.findFirst({
+      where: { id: input.boardingPlaceId, tourId: tour.id, type: "DURAK" },
+    });
+    if (place) {
+      boardingName = place.name;
+      if (place.price != null) unitPrice = place.price;
+    }
+  }
+  // İzin verilen koltuk durumları (elden satışta BLOKE koltuklar da satılabilir).
+  const sellableStatuses = input.allowBlocked ? ["BOS", "BLOKE"] : ["BOS"];
+
   if (tour.bookingType === "KOLTUK") {
     const codes = input.seatCodes ?? [];
     if (codes.length === 0)
@@ -102,7 +119,7 @@ export async function createPendingBooking(
       });
       if (seats.length !== codes.length)
         return { ok: false as const, error: "Geçersiz koltuk seçimi." };
-      const notFree = seats.filter((s) => s.status !== "BOS");
+      const notFree = seats.filter((s) => !sellableStatuses.includes(s.status));
       if (notFree.length > 0)
         return {
           ok: false as const,
@@ -135,7 +152,7 @@ export async function createPendingBooking(
         }
       }
 
-      const amount = tour.price * codes.length;
+      const amount = unitPrice * codes.length;
       const booking = await tx.booking.create({
         data: {
           tourId: tour.id,
@@ -145,6 +162,7 @@ export async function createPendingBooking(
           contactPhone: input.contactPhone,
           contactEmail: input.contactEmail,
           quantity: codes.length,
+          boardingName,
           holdExpiresAt,
           passengers: {
             create: input.passengers.map((p, i) => ({
@@ -161,7 +179,7 @@ export async function createPendingBooking(
       // Koltukları kilitle + cinsiyet yaz (her koltuk kendi cinsiyetiyle)
       for (const code of codes) {
         await tx.seat.updateMany({
-          where: { tourId: tour.id, code, status: "BOS" },
+          where: { tourId: tour.id, code, status: { in: sellableStatuses } },
           data: { status: "KILITLI", gender: genderByCode[code] },
         });
       }
@@ -191,7 +209,7 @@ export async function createPendingBooking(
         error: `Yeterli kontenjan yok. Kalan: ${Math.max(0, left)} kişi.`,
       };
 
-    const amount = tour.price * qty;
+    const amount = unitPrice * qty;
     const booking = await tx.booking.create({
       data: {
         tourId: tour.id,
@@ -201,6 +219,7 @@ export async function createPendingBooking(
         contactPhone: input.contactPhone,
         contactEmail: input.contactEmail,
         quantity: qty,
+        boardingName,
         holdExpiresAt,
         passengers: {
           create: input.passengers.map((p) => ({
@@ -275,7 +294,8 @@ export async function markBookingPaid(
 export async function createManualPaidBooking(
   input: CreateBookingInput & { totalOverride?: number | null }
 ): Promise<CreateResult> {
-  const created = await createPendingBooking(input);
+  // Acente elden satışı: online satışa kapatılmış (BLOKE) koltuklar da satılabilir.
+  const created = await createPendingBooking({ ...input, allowBlocked: true });
   if (!created.ok) return created;
 
   const paid = await markBookingPaid(created.bookingId, "NAKIT", {

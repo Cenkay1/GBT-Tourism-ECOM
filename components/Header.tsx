@@ -23,7 +23,7 @@ export default function Header() {
           <img
             src="/logo.png"
             alt="Gözdem Burak Turizm"
-            className="h-11 w-auto sm:h-14"
+            className="h-14 w-auto sm:h-18 md:h-20"
           />
         </Link>
 

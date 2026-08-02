@@ -66,6 +66,7 @@ async function tourDataFromForm(fd: FormData) {
     .map((s) => s.trim())
     .filter(Boolean);
   const features = parseIdList(str(fd, "features"));
+  const excludedFeatures = parseIdList(str(fd, "excludedFeatures"));
   const highlights = str(fd, "highlights")
     .split("\n")
     .map((s) => s.trim())
@@ -99,6 +100,7 @@ async function tourDataFromForm(fd: FormData) {
     seatLayout,
     seatRows: bookingType === "KOLTUK" ? optNum(fd, "seatRows") : null,
     features: JSON.stringify(features),
+    excludedFeatures: JSON.stringify(excludedFeatures),
     status: str(fd, "status") || "YAYINDA",
   };
 }
@@ -109,6 +111,7 @@ interface PlaceInput {
   address?: string;
   mapQuery?: string;
   nights?: number;
+  price?: number;
 }
 
 // Form'dan gelen JSON durak/otel listesini kaydet (önce mevcutları sil).
@@ -131,6 +134,7 @@ async function savePlaces(tourId: string, raw: string) {
       address: p.address?.trim() || null,
       mapQuery: (p.mapQuery?.trim() || p.address?.trim() || p.name.trim()) || null,
       nights: p.type === "OTEL" && p.nights ? Number(p.nights) : null,
+      price: p.type === "DURAK" && p.price ? Math.round(Number(p.price)) : null,
       sortOrder: i,
     })),
   });
@@ -197,6 +201,19 @@ export async function deleteTour(id: string) {
   await prisma.tour.delete({ where: { id } });
   revalidatePath("/");
   revalidatePath("/admin/turlar");
+}
+
+// ---- KOLTUK YÖNETİMİ (BLOKE) ----
+// Acente görevlisi ön/istenen koltukları online satışa kapatır (BLOKE) veya açar (BOS).
+// Satılı/kilitli koltuklara dokunulmaz.
+export async function toggleSeatBlock(tourId: string, code: string, block: boolean) {
+  await requireAdmin();
+  await prisma.seat.updateMany({
+    where: { tourId, code, status: block ? "BOS" : "BLOKE" },
+    data: { status: block ? "BLOKE" : "BOS" },
+  });
+  revalidatePath(`/admin/turlar/${tourId}/koltuklar`);
+  revalidatePath("/");
 }
 
 // ---- AFİŞ ----

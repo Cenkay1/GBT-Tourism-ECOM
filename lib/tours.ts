@@ -59,6 +59,7 @@ type TourRow = {
   seatLayout: string | null;
   seatRows: number | null;
   features: string;
+  excludedFeatures: string;
   status: string;
 };
 
@@ -76,9 +77,11 @@ function toTour(
   extra?: {
     sold?: number;
     soldSeats?: string[];
+    blockedSeats?: string[];
     seatGenders?: Record<string, Gender>;
     places?: TourPlace[];
     amenities?: Amenity[];
+    excludedAmenities?: Amenity[];
   }
 ): Tour {
   return {
@@ -105,10 +108,13 @@ function toTour(
     seatRows: row.seatRows ?? undefined,
     sold: extra?.sold,
     soldSeats: extra?.soldSeats,
+    blockedSeats: extra?.blockedSeats,
     seatGenders: extra?.seatGenders,
     places: extra?.places,
     features: parseJsonArray(row.features),
+    excludedFeatures: parseJsonArray(row.excludedFeatures),
     amenities: extra?.amenities,
+    excludedAmenities: extra?.excludedAmenities,
   };
 }
 
@@ -145,8 +151,12 @@ export async function getTourById(id: string): Promise<Tour | null> {
   });
   if (!row) return null;
 
-  const takenSeatRows = row.seats.filter((s) => s.status !== "BOS");
+  // Satılı/kilitli koltuklar müsait değil; BLOKE koltuklar admin tarafından kapatılmış.
+  const takenSeatRows = row.seats.filter(
+    (s) => s.status === "SATILDI" || s.status === "KILITLI"
+  );
   const takenSeats = takenSeatRows.map((s) => s.code);
+  const blockedSeats = row.seats.filter((s) => s.status === "BLOKE").map((s) => s.code);
   const seatGenders: Record<string, Gender> = {};
   for (const s of takenSeatRows) {
     if (s.gender === "E" || s.gender === "K") seatGenders[s.code] = s.gender;
@@ -171,11 +181,13 @@ export async function getTourById(id: string): Promise<Tour | null> {
     address: p.address ?? undefined,
     mapQuery: p.mapQuery ?? undefined,
     nights: p.nights ?? undefined,
+    price: p.price ?? undefined,
     sortOrder: p.sortOrder,
   }));
 
   return toTour(row as TourRow, {
     soldSeats: takenSeats,
+    blockedSeats,
     seatGenders,
     sold: soldCount,
     places,
@@ -235,9 +247,12 @@ export async function getTourBySlug(slug: string): Promise<Tour | null> {
   });
   if (!row) return null;
 
-  // Satılı VE kilitli koltuklar müsait değil.
-  const takenSeatRows = row.seats.filter((s) => s.status !== "BOS");
+  // Satılı VE kilitli koltuklar müsait değil; BLOKE koltuklar admin tarafından kapatılmış.
+  const takenSeatRows = row.seats.filter(
+    (s) => s.status === "SATILDI" || s.status === "KILITLI"
+  );
   const takenSeats = takenSeatRows.map((s) => s.code);
+  const blockedSeats = row.seats.filter((s) => s.status === "BLOKE").map((s) => s.code);
   const seatGenders: Record<string, Gender> = {};
   for (const s of takenSeatRows) {
     if (s.gender === "E" || s.gender === "K") seatGenders[s.code] = s.gender;
@@ -263,17 +278,23 @@ export async function getTourBySlug(slug: string): Promise<Tour | null> {
     address: p.address ?? undefined,
     mapQuery: p.mapQuery ?? undefined,
     nights: p.nights ?? undefined,
+    price: p.price ?? undefined,
     sortOrder: p.sortOrder,
   }));
 
   const amenities = await resolveAmenities(parseJsonArray(row.features));
+  const excludedAmenities = await resolveAmenities(
+    parseJsonArray((row as unknown as TourRow).excludedFeatures)
+  );
 
   return toTour(row as TourRow, {
     soldSeats: takenSeats,
+    blockedSeats,
     seatGenders,
     sold: soldCount,
     places,
     amenities,
+    excludedAmenities,
   });
 }
 

@@ -33,6 +33,7 @@ model Tour {
   seatLayout        String? // 2+2 | 2+1 | 1+1 (araç tipinden türetilir)
   seatRows          Int?
   features          String    @default("[]") // seçili özellik id'leri (JSON dizi)
+  excludedFeatures  String    @default("[]") // fiyata dahil OLMAYAN özellik id'leri (JSON dizi)
   status            String    @default("YAYINDA") // TASLAK | YAYINDA
   createdAt         DateTime  @default(now())
 
@@ -50,6 +51,7 @@ model TourPlace {
   address   String?
   mapQuery  String? // gömme harita için: adres veya "enlem,boylam"
   nights    Int? // OTEL için gece sayısı (opsiyonel)
+  price     Int? // DURAK için biniş noktası bazlı kişi başı fiyat (opsiyonel; boşsa tur fiyatı)
   sortOrder Int     @default(0)
 }
 
@@ -74,6 +76,7 @@ model Booking {
   contactPhone  String
   contactEmail  String
   quantity      Int       @default(1)
+  boardingName   String?   // yolcunun binis noktasi (secilen DURAK adi)
   paymentMethod  String    @default("ONLINE") // ONLINE | NAKIT
   paymentRef     String?
   holdExpiresAt  DateTime?
