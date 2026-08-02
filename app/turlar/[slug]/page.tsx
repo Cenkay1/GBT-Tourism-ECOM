@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import BookingLauncher from "@/components/BookingLauncher";
@@ -6,6 +7,40 @@ import { getTourBySlug, formatPrice, formatDate, categoryLabel, vehicleLabel } f
 import { MapPinIcon, BusIcon } from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
+
+// Turu WhatsApp/Instagram/Google'da paylaşınca kapak görseli, başlık ve fiyat çıksın.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const tour = await getTourBySlug(slug);
+  if (!tour) return { title: "Tur bulunamadı" };
+
+  const priceText = formatPrice(tour.price, tour.currency);
+  const desc =
+    (tour.description?.trim() ||
+      `${tour.destination} · ${tour.durationDays} gün · Kişi başı ${priceText}`).slice(0, 200);
+  const image = tour.coverImage || "/logo.png";
+
+  return {
+    title: tour.title,
+    description: desc,
+    openGraph: {
+      type: "website",
+      title: `${tour.title} — ${priceText}`,
+      description: desc,
+      images: [{ url: image, alt: tour.title }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${tour.title} — ${priceText}`,
+      description: desc,
+      images: [image],
+    },
+  };
+}
 
 export default async function TourDetail({
   params,

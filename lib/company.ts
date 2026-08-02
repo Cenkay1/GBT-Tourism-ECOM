@@ -3,6 +3,7 @@ export const COMPANY = {
   name: "Gözdem Burak Turizm",
   tagline: "Karadeniz Ereğli'nin En Büyük Seyahat Acentası",
   phones: ["+90 536 612 67 35"],
+  whatsapp: "905366126735", // wa.me için uluslararası biçim (yalnızca rakam)
   emails: ["info@gozdemburakturizm.com"],
   address: "Müftü, Yazar İlhami Sosyal Sk. No:42/1, 67300 Ereğli/Zonguldak",
   mapQuery: "Gözdem Burak Turizm, Yazar İlhami Sosyal Sk. No:42, Ereğli, Zonguldak",
@@ -27,4 +28,10 @@ export const COMPANY = {
 // tel: bağlantısı için sadeleştirilmiş numara
 export function telHref(phone: string): string {
   return "tel:" + phone.replace(/\s/g, "");
+}
+
+// WhatsApp sohbet bağlantısı (opsiyonel hazır mesaj ile).
+export function whatsappHref(message?: string): string {
+  const base = `https://wa.me/${COMPANY.whatsapp}`;
+  return message ? `${base}?text=${encodeURIComponent(message)}` : base;
 }

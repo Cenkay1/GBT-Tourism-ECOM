@@ -37,7 +37,15 @@ function GoogleG() {
   );
 }
 
-export default function ReviewsSection({ reviews }: { reviews: Review[] }) {
+export default function ReviewsSection({
+  reviews,
+  rating = COMPANY.google.rating,
+  reviewCount = COMPANY.google.reviewCount,
+}: {
+  reviews: Review[];
+  rating?: number;
+  reviewCount?: number;
+}) {
   if (reviews.length === 0) return null;
 
   // Kayan şerit için listeyi ikiye katla (kesintisiz döngü)
@@ -62,12 +70,12 @@ export default function ReviewsSection({ reviews }: { reviews: Review[] }) {
           <div className="leading-tight">
             <div className="flex items-center gap-1.5">
               <span className="text-lg font-extrabold text-slate-800">
-                {COMPANY.google.rating.toFixed(1)}
+                {rating.toFixed(1)}
               </span>
-              <Stars rating={Math.round(COMPANY.google.rating)} />
+              <Stars rating={Math.round(rating)} />
             </div>
             <span className="text-xs text-slate-500">
-              {COMPANY.google.reviewCount} Google yorumu
+              {reviewCount.toLocaleString("tr-TR")} Google yorumu
             </span>
           </div>
         </a>

@@ -3,6 +3,7 @@ import BannerCarousel from "@/components/BannerCarousel";
 import TourCard from "@/components/TourCard";
 import ReviewsSection from "@/components/ReviewsSection";
 import { getPublishedTours, getActiveBanners, getActiveReviews } from "@/lib/tours";
+import { getGoogleBusiness } from "@/lib/google-reviews";
 import {
   SearchIcon,
   TicketIcon,
@@ -14,11 +15,15 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [tours, banners, reviews] = await Promise.all([
+  const [tours, banners, manualReviews, google] = await Promise.all([
     getPublishedTours(),
     getActiveBanners(),
     getActiveReviews(),
+    getGoogleBusiness(),
   ]);
+  // Google API varsa canlı yorum/puanı kullan; yoksa elle girilen yorumlara düş.
+  const reviews =
+    google && google.reviews.length > 0 ? google.reviews : manualReviews;
   const yurtIci = tours.filter((t) => t.category === "YURT_ICI");
   const yurtDisi = tours.filter((t) => t.category === "YURT_DISI");
 
@@ -107,7 +112,11 @@ export default async function Home() {
       </Section>
 
       {/* Misafir yorumları */}
-      <ReviewsSection reviews={reviews} />
+      <ReviewsSection
+        reviews={reviews}
+        rating={google?.rating}
+        reviewCount={google?.reviewCount}
+      />
 
       {/* Güven bandı */}
       <div className="mt-16 grid gap-6 rounded-2xl bg-brand p-8 text-white sm:grid-cols-3">

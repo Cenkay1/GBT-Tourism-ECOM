@@ -218,6 +218,24 @@ export async function createBanner(fd: FormData) {
   redirect("/admin/afisler");
 }
 
+export async function updateBanner(id: string, fd: FormData) {
+  await requireAdmin();
+  await prisma.banner.update({
+    where: { id },
+    data: {
+      title: str(fd, "title"),
+      subtitle: str(fd, "subtitle"),
+      image: str(fd, "image"),
+      linkUrl: str(fd, "linkUrl"),
+      sortOrder: num(fd, "sortOrder"),
+      active: fd.get("active") === "on",
+    },
+  });
+  revalidatePath("/");
+  revalidatePath("/admin/afisler");
+  redirect("/admin/afisler");
+}
+
 export async function deleteBanner(id: string) {
   await requireAdmin();
   await prisma.banner.delete({ where: { id } });
@@ -239,6 +257,24 @@ export async function createAmenity(fd: FormData) {
   const name = str(fd, "name");
   if (!name) redirect("/admin/ozellikler");
   await prisma.amenity.create({
+    data: {
+      name,
+      icon: str(fd, "icon"),
+      sortOrder: num(fd, "sortOrder"),
+      active: fd.get("active") === "on",
+    },
+  });
+  revalidatePath("/admin/ozellikler");
+  revalidatePath("/admin/turlar");
+  redirect("/admin/ozellikler");
+}
+
+export async function updateAmenity(id: string, fd: FormData) {
+  await requireAdmin();
+  const name = str(fd, "name");
+  if (!name) redirect(`/admin/ozellikler/${id}`);
+  await prisma.amenity.update({
+    where: { id },
     data: {
       name,
       icon: str(fd, "icon"),

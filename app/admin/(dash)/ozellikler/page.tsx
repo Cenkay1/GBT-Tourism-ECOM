@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { createAmenity, deleteAmenity, toggleAmenity } from "@/lib/admin-actions";
 import DeleteButton from "@/components/admin/DeleteButton";
@@ -46,6 +47,12 @@ export default async function AdminAmenities() {
                 >
                   {a.active ? "Aktif" : "Pasif"}
                 </span>
+                <Link
+                  href={`/admin/ozellikler/${a.id}`}
+                  className="rounded-md px-3 py-1.5 text-xs font-semibold text-brand hover:bg-slate-100"
+                >
+                  Düzenle
+                </Link>
                 <form
                   action={async () => {
                     "use server";

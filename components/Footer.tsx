@@ -6,8 +6,14 @@ export default function Footer() {
     <footer className="mt-16 bg-brand text-white/90">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 sm:grid-cols-2 md:grid-cols-4">
         <div>
+          {/* Lacivert-çizimli logoyu beyaz rozet içinde göster: footer lacivertiyle
+              logonun gömülü lacivert arka planı birbirini tutmadığından kutu görünmesin. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-navy.png" alt="Gözdem Burak Turizm" className="h-20 w-auto" />
+          <img
+            src="/logo.png"
+            alt="Gözdem Burak Turizm"
+            className="h-20 w-auto rounded-xl bg-white p-3 shadow-sm"
+          />
         </div>
         <div>
           <h3 className="mb-3 font-semibold text-white">Kurumsal</h3>

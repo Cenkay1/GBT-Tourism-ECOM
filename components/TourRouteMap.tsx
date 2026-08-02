@@ -28,10 +28,14 @@ async function geocode(query: string): Promise<google.maps.LatLngLiteral | null>
     /* yoksay */
   }
   try {
+    // Zaman aşımı: sunucu/istemci ağı yavaşsa istek askıda kalıp "Rota çiziliyor…"
+    // spinner'ını sonsuza kadar tutmasın diye 6 sn sonra iptal et.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`,
-      { headers: { "Accept-Language": "tr" } },
-    );
+      { headers: { "Accept-Language": "tr" }, signal: ctrl.signal },
+    ).finally(() => clearTimeout(timer));
     const data = (await res.json()) as Array<{ lat: string; lon: string }>;
     if (!data.length) return null;
     const geo = { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
@@ -116,6 +120,12 @@ export default function TourRouteMap({
     const container = containerRef.current;
     if (!container) return;
     let cancelled = false;
+
+    // Güvenlik ağı: rota/konum bulma ne olursa olsun 10 sn içinde spinner'ı kaldır.
+    // (Directions API kapalıysa ve yedek geocoder yanıt vermezse takılmayı önler.)
+    const watchdog = window.setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 10000);
 
     (async () => {
       let mapsLib: google.maps.MapsLibrary;
@@ -244,6 +254,7 @@ export default function TourRouteMap({
 
     return () => {
       cancelled = true;
+      window.clearTimeout(watchdog);
       markersRef.current.forEach((m) => m?.setMap(null));
       markersRef.current = [];
       mapRef.current = null;

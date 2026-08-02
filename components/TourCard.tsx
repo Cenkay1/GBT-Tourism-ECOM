@@ -44,6 +44,25 @@ export default function TourCard({ tour }: { tour: Tour }) {
             {tour.departureLocation}
           </span>
         </div>
+        {tour.amenities && tour.amenities.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {tour.amenities.slice(0, 4).map((a) => (
+              <span
+                key={a.id}
+                title={a.name}
+                className="inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent-dark"
+              >
+                <span className="leading-none">{a.icon || "✓"}</span>
+                {a.name}
+              </span>
+            ))}
+            {tour.amenities.length > 4 && (
+              <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                +{tour.amenities.length - 4}
+              </span>
+            )}
+          </div>
+        )}
         {seatsLeft != null && seatsLeft <= 10 && (
           <p className="mt-2 text-xs font-semibold text-accent">
             Son {seatsLeft} kontenjan!

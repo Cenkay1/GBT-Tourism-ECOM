@@ -191,7 +191,17 @@ export async function getPublishedTours(filters?: {
     orderBy: { departureDate: "asc" },
   });
 
-  let tours = rows.map((r) => toTour(r as TourRow));
+  // Tüm aktif özellikleri bir kez çek, id→özellik map'i kur (tur başına ekstra sorgu yok).
+  const allAmenities = await getActiveAmenities();
+  const amenityById = new Map(allAmenities.map((a) => [a.id, a]));
+
+  let tours = rows.map((r) => {
+    const ids = parseJsonArray((r as TourRow).features);
+    const amenities = ids
+      .map((id) => amenityById.get(id))
+      .filter((a): a is Amenity => Boolean(a));
+    return toTour(r as TourRow, { amenities });
+  });
 
   if (filters?.category) {
     tours = tours.filter((t) => t.category === filters.category);
@@ -203,6 +213,16 @@ export async function getPublishedTours(filters?: {
     );
   }
   return tours;
+}
+
+// Afiş link seçici gibi yerler için hafif tur listesi (yayında olanlar, tarihe göre).
+export async function getTourOptions(): Promise<{ slug: string; title: string }[]> {
+  const rows = await prisma.tour.findMany({
+    where: { status: "YAYINDA" },
+    orderBy: { departureDate: "asc" },
+    select: { slug: true, title: true },
+  });
+  return rows;
 }
 
 export async function getTourBySlug(slug: string): Promise<Tour | null> {

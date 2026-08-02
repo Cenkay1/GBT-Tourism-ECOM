@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { COMPANY } from "@/lib/company";
 
@@ -8,8 +7,8 @@ function Star({ filled }: { filled: boolean }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      width={40}
-      height={40}
+      width={44}
+      height={44}
       fill={filled ? "#f59e0b" : "none"}
       stroke={filled ? "#f59e0b" : "#cbd5e1"}
       strokeWidth={1.5}
@@ -21,92 +20,69 @@ function Star({ filled }: { filled: boolean }) {
   );
 }
 
+// "G" harfli Google rozeti
+function GoogleG() {
+  return (
+    <span
+      style={{
+        background: "conic-gradient(#ea4335 0 25%, #fbbc05 0 50%, #34a853 0 75%, #4285f4 0)",
+        WebkitBackgroundClip: "text",
+        backgroundClip: "text",
+        color: "transparent",
+      }}
+      className="text-lg font-bold"
+    >
+      G
+    </span>
+  );
+}
+
+// Not: Google'a yorum API ile gönderilemez (Google kuralı). Bu yüzden müşteriyi
+// tek tıkla doğrudan Google'ın kendi yorum ekranına götürüyoruz — orada puanını
+// verip yorumunu TEK YERDE yazar. Sitede ayrı bir metin kutusu tutmuyoruz ki
+// müşteri aynı yorumu iki kez yazmak zorunda kalmasın.
 export default function RateUsCard() {
-  const [rating, setRating] = useState(0);
-  const [hover, setHover] = useState(0);
-  const [text, setText] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [sent, setSent] = useState(false);
-
-  async function handleSubmit() {
-    if (rating === 0) return;
-    // Yazılan yorumu panoya kopyala — müşteri Google sayfasında tek tık yapıştırsın.
-    if (text.trim()) {
-      try {
-        await navigator.clipboard.writeText(text.trim());
-        setCopied(true);
-      } catch {
-        setCopied(false);
-      }
-    }
-    // Google "yorum yaz" sayfasını müşterinin kendi hesabıyla açılacak şekilde aç.
+  function openGoogle() {
     window.open(COMPANY.google.writeReviewUrl, "_blank", "noopener,noreferrer");
-    setSent(true);
   }
-
-  const active = hover || rating;
 
   return (
     <div className="mt-5 rounded-2xl bg-white p-8 text-center shadow-sm">
       <h2 className="text-xl font-extrabold text-brand">Deneyiminizi Değerlendirin</h2>
-      <p className="mt-1.5 text-sm text-slate-500">
-        Görüşünüz bizim için çok değerli. Puanınızı verip yorumunuzu Google&apos;da paylaşın.
+      <p className="mx-auto mt-1.5 max-w-md text-sm text-slate-500">
+        Görüşünüz bizim için çok değerli. Bir yıldıza dokunun — Google&apos;da açılan sayfada
+        puanınızı verip yorumunuzu tek seferde yazabilirsiniz.
       </p>
 
-      {/* Yıldızlar */}
+      {/* Yıldızlar — herhangi birine dokununca doğrudan Google'a gider */}
       <div className="mt-5 flex items-center justify-center gap-1">
         {[1, 2, 3, 4, 5].map((n) => (
           <button
             key={n}
             type="button"
-            aria-label={`${n} yıldız`}
-            onClick={() => setRating(n)}
-            onMouseEnter={() => setHover(n)}
-            onMouseLeave={() => setHover(0)}
+            aria-label={`${n} yıldız verip Google'da değerlendir`}
+            onClick={openGoogle}
             className="rounded p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
           >
-            <Star filled={n <= active} />
+            <Star filled={false} />
           </button>
         ))}
       </div>
 
-      {/* Yorum */}
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        rows={4}
-        placeholder="Yorumunuzu buraya yazın… (isteğe bağlı)"
-        className="mt-5 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-brand focus:bg-white"
-      />
+      <button
+        type="button"
+        onClick={openGoogle}
+        className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition hover:bg-accent-dark"
+      >
+        <GoogleG />
+        Google&apos;da Değerlendir
+      </button>
 
-      {!sent ? (
-        <button
-          type="button"
-          onClick={handleSubmit}
-          disabled={rating === 0}
-          className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white transition hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {rating === 0 ? "Önce puan verin" : "Google'da Değerlendir"}
-        </button>
-      ) : (
-        <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {copied
-            ? "Yorumunuz panoya kopyalandı. Açılan Google sayfasına yapıştırıp gönderebilirsiniz. Teşekkürler!"
-            : "Açılan Google sayfasından yorumunuzu paylaşabilirsiniz. Teşekkürler!"}
-          <div className="mt-2">
-            <a
-              href={COMPANY.google.writeReviewUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-semibold text-emerald-700 underline"
-            >
-              Google sayfası açılmadıysa buraya tıklayın
-            </a>
-          </div>
-        </div>
-      )}
+      <p className="mt-3 text-xs text-slate-400">
+        Değerlendirme Google hesabınız üzerinden yapılır; birkaç saniye sürer.
+      </p>
 
-      <div className="mt-4">
+      <div className="mt-5">
         <Link href="/" className="text-sm font-medium text-slate-500 hover:text-brand">
           Ana Sayfaya Dön
         </Link>
