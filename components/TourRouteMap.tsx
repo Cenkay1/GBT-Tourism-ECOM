@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TourPlace, mapLinkUrl } from "@/lib/shared";
+import { TourPlace, mapLinkUrl, mapEmbedUrl } from "@/lib/shared";
 import { MapPinIcon, BusIcon } from "@/components/Icons";
 import { loadGoogleLib, GOOGLE_MAPS_KEY } from "@/lib/googleMaps";
 
@@ -109,11 +109,27 @@ export default function TourRouteMap({
   const [active, setActive] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Google Maps kimlik hatası (anahtar geçersiz/domaine kısıtlı) olursa anahtarsız
+  // gömme haritaya (iframe) düşeriz — böylece yerelde ve anahtar bozulsa da harita çalışır.
+  const [authFailed, setAuthFailed] = useState(false);
+
+  useEffect(() => {
+    const w = window as unknown as { gm_authFailure?: () => void };
+    const prev = w.gm_authFailure;
+    w.gm_authFailure = () => {
+      setAuthFailed(true);
+      setLoading(false);
+    };
+    return () => {
+      w.gm_authFailure = prev;
+    };
+  }, []);
 
   useEffect(() => {
     if (points.length === 0) return;
     if (!API_KEY) {
-      setError("Google Maps API anahtarı eksik (.env → NEXT_PUBLIC_GOOGLE_MAPS_API_KEY).");
+      // Anahtar yoksa doğrudan anahtarsız gömme haritaya düş.
+      setAuthFailed(true);
       setLoading(false);
       return;
     }
@@ -342,12 +358,23 @@ export default function TourRouteMap({
       {/* Harita — `isolate` ile kendi stacking context'ine kapatılır ki
           içindeki katmanlar modal gibi üst öğelerin üzerine taşmasın. */}
       <div className="relative isolate overflow-hidden rounded-2xl ring-1 ring-black/5">
-        <div
-          ref={containerRef}
-          className="h-72 w-full md:h-full md:min-h-[380px]"
-          style={{ background: "#e5e7eb" }}
-        />
-        {loading && !error && (
+        {authFailed ? (
+          <iframe
+            key={points[active].query}
+            title={points[active].name}
+            src={mapEmbedUrl(points[active].query)}
+            className="h-72 w-full md:h-full md:min-h-[380px]"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        ) : (
+          <div
+            ref={containerRef}
+            className="h-72 w-full md:h-full md:min-h-[380px]"
+            style={{ background: "#e5e7eb" }}
+          />
+        )}
+        {loading && !error && !authFailed && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/60 backdrop-blur-sm">
             <span className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-brand shadow">
               Rota çiziliyor…

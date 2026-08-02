@@ -28,9 +28,9 @@ export default function BoardingSelector({
     <div className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5 ${className}`}>
       <h3 className="font-bold text-brand">Nereden bineceksiniz?</h3>
       <p className="mt-0.5 text-xs text-slate-400">
-        Biniş noktanıza göre kişi başı fiyat değişebilir.
+        Biniş noktanızı seçin — fiyat biniş noktasına göre değişebilir.
       </p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="mt-3 flex flex-col gap-2">
         {stops.map((s) => {
           const active = value === s.id;
           const price = s.price ?? basePrice;
@@ -39,21 +39,21 @@ export default function BoardingSelector({
               key={s.id}
               type="button"
               onClick={() => onChange(s.id)}
-              className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-3 text-left transition ${
+              className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition ${
                 active
                   ? "border-accent bg-accent/10"
                   : "border-slate-200 hover:bg-slate-50"
               }`}
             >
-              <span className="flex items-center gap-2">
+              <span className="flex items-center gap-2.5">
                 <span
-                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
                     active ? "border-accent" : "border-slate-300"
                   }`}
                 >
-                  {active && <span className="h-2 w-2 rounded-full bg-accent" />}
+                  {active && <span className="h-2.5 w-2.5 rounded-full bg-accent" />}
                 </span>
-                <span className="text-sm font-medium text-slate-700">{s.name}</span>
+                <span className="text-sm font-semibold text-slate-700">{s.name}</span>
               </span>
               <span className="shrink-0 text-sm font-bold text-accent">
                 {formatPrice(price, currency)}
