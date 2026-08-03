@@ -4,6 +4,8 @@ import { getTourBySlug, formatPrice, formatDate } from "@/lib/tours";
 import { Gender } from "@/lib/shared";
 import { submitCheckout } from "@/lib/checkout-actions";
 import CheckoutForm from "@/components/CheckoutForm";
+import { getCurrentUser } from "@/lib/session";
+import { earnedFor } from "@/lib/loyalty";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +60,15 @@ export default async function CheckoutPage({
   const count = tour.bookingType === "KOLTUK" ? seats.length : quantity;
   const total = unitPrice * count;
 
+  // Giriş yapan müşteri: iletişim alanlarını ön-doldur + kazanılacak puanı göster.
+  const user = await getCurrentUser();
+  const earnPoints = earnedFor(total);
+  const selfParams = new URLSearchParams({ tur: tur! });
+  if (koltuklar) selfParams.set("koltuklar", koltuklar);
+  if (adet) selfParams.set("adet", adet);
+  if (durak) selfParams.set("durak", durak);
+  const loginHref = `/giris?next=${encodeURIComponent(`/rezervasyon?${selfParams.toString()}`)}`;
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <nav className="mb-4 text-sm text-slate-500">
@@ -78,6 +89,18 @@ export default async function CheckoutPage({
           action={submitCheckout}
           boardingPlaceId={boardingStop?.id}
           boardingLabel={boardingStop?.name}
+          defaults={
+            user
+              ? {
+                  contactName: user.name ?? undefined,
+                  contactPhone: user.phone ?? undefined,
+                  contactEmail: user.email,
+                }
+              : undefined
+          }
+          earnPoints={earnPoints}
+          loggedIn={Boolean(user)}
+          loginHref={loginHref}
           summary={{
             title: tour.title,
             destination: tour.destination,

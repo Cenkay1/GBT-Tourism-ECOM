@@ -8,6 +8,7 @@ import {
   ImageIcon,
   TicketIcon,
   UsersIcon,
+  UserIcon,
   CheckIcon,
 } from "@/components/Icons";
 
@@ -17,6 +18,7 @@ const items = [
   { href: "/admin/ozellikler", label: "Özellikler", Icon: CheckIcon },
   { href: "/admin/afisler", label: "Afişler", Icon: ImageIcon },
   { href: "/admin/rezervasyonlar", label: "Rezervasyonlar", Icon: TicketIcon },
+  { href: "/admin/uyeler", label: "Üyeler", Icon: UserIcon },
   { href: "/admin/yorumlar", label: "Yorumlar", Icon: UsersIcon },
 ];
 

@@ -35,6 +35,10 @@ export default function CheckoutForm({
   summary,
   boardingPlaceId,
   boardingLabel,
+  defaults,
+  earnPoints = 0,
+  loggedIn = false,
+  loginHref,
 }: {
   tour: CheckoutTour;
   seats: SeatPick[];
@@ -43,6 +47,10 @@ export default function CheckoutForm({
   summary: CheckoutSummary;
   boardingPlaceId?: string;
   boardingLabel?: string;
+  defaults?: { contactName?: string; contactPhone?: string; contactEmail?: string };
+  earnPoints?: number;
+  loggedIn?: boolean;
+  loginHref?: string;
 }) {
   const isSeat = tour.bookingType === "KOLTUK";
   const count = isSeat ? seats.length : quantity;
@@ -178,7 +186,7 @@ export default function CheckoutForm({
             Biletiniz ve tur bilgileri bu adrese gönderilecektir.
           </p>
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field name="contactName" labelText="Ad Soyad *" input={input} label={label} error={errors["contactName"]} />
+            <Field name="contactName" labelText="Ad Soyad *" input={input} label={label} error={errors["contactName"]} defaultValue={defaults?.contactName} />
             <Field
               name="contactPhone"
               labelText="Telefon *"
@@ -187,8 +195,9 @@ export default function CheckoutForm({
               error={errors["contactPhone"]}
               placeholder="0(5xx) xxx xx xx"
               inputMode="tel"
+              defaultValue={defaults?.contactPhone}
             />
-            <Field name="contactEmail" labelText="E-posta *" input={input} label={label} error={errors["contactEmail"]} type="email" />
+            <Field name="contactEmail" labelText="E-posta *" input={input} label={label} error={errors["contactEmail"]} type="email" defaultValue={defaults?.contactEmail} />
           </div>
         </section>
       </div>
@@ -216,7 +225,22 @@ export default function CheckoutForm({
           <span>Toplam</span>
           <span className="text-accent">{summary.totalLabel}</span>
         </div>
-        <button className="mt-5 w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition hover:bg-accent-dark">
+        {earnPoints > 0 &&
+          (loggedIn ? (
+            <p className="mt-4 flex items-center justify-center gap-1.5 rounded-lg bg-accent/5 px-3 py-2 text-center text-xs font-medium text-accent">
+              <span aria-hidden>★</span>
+              Bu rezervasyondan ~{earnPoints.toLocaleString("tr-TR")} puan kazanacaksınız.
+            </p>
+          ) : (
+            <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-center text-xs text-slate-500">
+              <a href={loginHref ?? "/giris"} className="font-semibold text-brand hover:text-accent">
+                Üye girişi
+              </a>{" "}
+              yaparsanız bu rezervasyondan ~{earnPoints.toLocaleString("tr-TR")} puan kazanırsınız.
+            </p>
+          ))}
+
+        <button className="mt-4 w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition hover:bg-accent-dark">
           Ödemeye Geç
         </button>
         <p className="mt-2 text-center text-[11px] text-slate-400">
@@ -246,6 +270,7 @@ function Field({
   placeholder,
   inputMode,
   maxLength,
+  defaultValue,
 }: {
   name: string;
   labelText: string;
@@ -256,6 +281,7 @@ function Field({
   placeholder?: string;
   inputMode?: "text" | "numeric" | "tel" | "email";
   maxLength?: number;
+  defaultValue?: string;
 }) {
   return (
     <label className={label}>
@@ -266,6 +292,7 @@ function Field({
         placeholder={placeholder}
         inputMode={inputMode}
         maxLength={maxLength}
+        defaultValue={defaultValue}
         data-error={error ? "1" : undefined}
         className={`${input} ${error ? "border-red-400" : ""}`}
       />

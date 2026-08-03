@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { login, getSessionEmail } from "@/lib/auth";
+import PasswordInput from "@/components/PasswordInput";
 
 async function doLogin(fd: FormData) {
   "use server";
@@ -23,7 +24,11 @@ export default async function LoginPage({
       <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
         <div className="mb-6 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Gözdem Burak Turizm" className="mx-auto h-20 w-auto" />
+          <img
+            src="/logo.png"
+            alt="Gözdem Burak Turizm"
+            className="mx-auto block h-auto w-40"
+          />
           <h1 className="mt-4 text-lg font-bold text-brand">Yönetim Paneli</h1>
         </div>
 
@@ -40,16 +45,18 @@ export default async function LoginPage({
               name="email"
               type="email"
               required
-              defaultValue="admin@gozdemburak.com"
+              placeholder="E-posta adresiniz"
+              autoComplete="username"
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
             />
           </label>
           <label className="block text-sm font-medium text-slate-600">
             Şifre
-            <input
+            <PasswordInput
               name="password"
-              type="password"
               required
+              autoComplete="current-password"
+              placeholder="Şifreniz"
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand"
             />
           </label>

@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
 import { createPendingBooking, PassengerInput } from "@/lib/booking";
 import { startPayment } from "@/lib/payment";
+import { getCurrentUser } from "@/lib/session";
 
 function s(fd: FormData, k: string): string {
   return (fd.get(k) as string | null)?.trim() ?? "";
@@ -34,6 +35,9 @@ export async function submitCheckout(fd: FormData) {
     });
   }
 
+  // Oturumdaki müşteri (varsa) — userId istemciden DEĞİL, sunucudan alınır.
+  const currentUser = await getCurrentUser();
+
   const result = await createPendingBooking({
     tourId,
     contactName: s(fd, "contactName"),
@@ -43,6 +47,7 @@ export async function submitCheckout(fd: FormData) {
     seatCodes: bookingType === "KOLTUK" ? seatCodes : undefined,
     quantity: bookingType === "KONTENJAN" ? quantity : undefined,
     boardingPlaceId,
+    userId: currentUser?.id,
   });
 
   if (!result.ok) {

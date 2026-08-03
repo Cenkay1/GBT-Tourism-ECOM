@@ -137,3 +137,52 @@ export const ChevronRightIcon = (p: P) => (
     <path d="m9 6 6 6-6 6" />
   </svg>
 );
+
+export const UserIcon = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21a8 8 0 0 1 16 0" />
+  </svg>
+);
+
+export const StarIcon = (p: P) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <path d="M12 2.5l2.9 5.9 6.5.95-4.7 4.58 1.1 6.47L12 17.9 6.2 20.9l1.1-6.47L2.6 9.85l6.5-.95L12 2.5Z" />
+  </svg>
+);
+
+export const AwardIcon = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="8" r="5" />
+    <path d="M8.5 12.5 7 21l5-2.5L17 21l-1.5-8.5" />
+  </svg>
+);
+
+export const GiftIcon = (p: P) => (
+  <svg {...base(p)}>
+    <rect x="3" y="8" width="18" height="4" rx="1" />
+    <path d="M12 8v13M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8" />
+    <path d="M12 8S10.5 4 8 4a2 2 0 0 0 0 4h4ZM12 8s1.5-4 4-4a2 2 0 0 1 0 4h-4Z" />
+  </svg>
+);
+
+export const LogOutIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="M16 17l5-5-5-5M21 12H9" />
+  </svg>
+);
+
+export const EyeIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+export const EyeOffIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M10.6 6.1A9.8 9.8 0 0 1 12 6c6.5 0 10 6 10 6a15.4 15.4 0 0 1-3 3.4M6.6 6.6A15.5 15.5 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 4.6-1.1" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18" />
+  </svg>
+);

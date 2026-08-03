@@ -23,8 +23,15 @@ export default async function AdminLayout({
       <div className="flex">
         {/* Sidebar */}
         <aside className="hidden w-60 shrink-0 flex-col bg-brand p-5 text-white md:flex md:min-h-screen">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Gözdem Burak Turizm" className="mb-6 h-16 w-auto rounded-lg bg-white p-2" />
+          {/* Logo yığın (kare) biçimde; genişliğe göre ölçekle, beyaz kart üzerinde göster */}
+          <div className="mb-6 rounded-xl bg-white p-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="Gözdem Burak Turizm"
+              className="mx-auto block h-auto w-full max-w-[150px]"
+            />
+          </div>
           <AdminNav />
           <form action={doLogout} className="mt-auto pt-6">
             <button className="w-full rounded-lg bg-white/10 py-2 text-sm font-medium transition hover:bg-white/20">
@@ -38,7 +45,7 @@ export default async function AdminLayout({
           <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
             <div className="md:hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="Logo" className="h-9 w-auto" />
+              <img src="/logo.png" alt="Logo" className="h-auto w-20" />
             </div>
             <span className="ml-auto text-sm text-slate-500">{email}</span>
           </header>

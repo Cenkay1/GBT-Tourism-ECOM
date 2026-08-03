@@ -21,6 +21,7 @@ export interface CreateBookingInput {
   quantity?: number; // KONTENJAN turları için
   boardingPlaceId?: string; // seçilen biniş durağı (fiyatı buradan belirlenir)
   allowBlocked?: boolean; // acente elden satışı: BLOKE koltuklar da satılabilir
+  userId?: string; // giriş yapan müşteri (sadakat için; misafirde undefined)
 }
 
 export type CreateResult =
@@ -163,6 +164,7 @@ export async function createPendingBooking(
           contactEmail: input.contactEmail,
           quantity: codes.length,
           boardingName,
+          userId: input.userId ?? null,
           holdExpiresAt,
           passengers: {
             create: input.passengers.map((p, i) => ({
@@ -220,6 +222,7 @@ export async function createPendingBooking(
         contactEmail: input.contactEmail,
         quantity: qty,
         boardingName,
+        userId: input.userId ?? null,
         holdExpiresAt,
         passengers: {
           create: input.passengers.map((p) => ({
@@ -285,6 +288,14 @@ export async function markBookingPaid(
     } catch (e) {
       console.error("[Onay bildirimi hatası]", e);
     }
+  }
+
+  // Sadakat puanı (giriş yapmış müşteriye) — idempotent, best-effort, ödemeyi bloklamaz.
+  try {
+    const { awardLoyaltyForBooking } = await import("@/lib/loyalty");
+    await awardLoyaltyForBooking(bookingId);
+  } catch (e) {
+    console.error("[Sadakat puanı hatası]", e);
   }
   return { ok: true };
 }

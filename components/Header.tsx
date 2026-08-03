@@ -12,7 +12,7 @@ const links = [
   { href: "/iletisim", label: "İletişim" },
 ];
 
-export default function Header() {
+export default function Header({ account }: { account?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -45,6 +45,9 @@ export default function Header() {
             <PhoneIcon width={16} height={16} />
             <span className="hidden sm:inline">{COMPANY.phones[0]}</span>
           </a>
+
+          {/* Hesap: giriş bağlantısı ya da kullanıcı menüsü (sunucudan) */}
+          {account}
 
           {/* Hamburger — sadece mobil */}
           <button
