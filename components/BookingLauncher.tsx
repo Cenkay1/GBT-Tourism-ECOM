@@ -10,15 +10,19 @@ export default function BookingLauncher({
   tour,
   className,
   label,
+  initialFrom = null,
+  initialTo = null,
 }: {
   tour: Tour;
   className?: string;
   label?: string;
+  initialFrom?: string | null;
+  initialTo?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const isSeat = tour.bookingType === "KOLTUK";
-  const btnLabel = label ?? (isSeat ? "Koltuk Seç" : "Rezervasyon Yap");
+  const btnLabel = label ?? (isSeat ? "Koltuk Seç / Satın Al" : "Rezervasyon Yap");
 
   // Portal yalnızca istemcide (mount sonrası) kullanılabilir.
   useEffect(() => setMounted(true), []);
@@ -66,7 +70,11 @@ export default function BookingLauncher({
 
             {/* İçerik */}
             <div className="p-5">
-              {isSeat ? <SeatMap tour={tour} /> : <CapacityBooking tour={tour} />}
+              {isSeat ? (
+                <SeatMap tour={tour} initialFrom={initialFrom} initialTo={initialTo} />
+              ) : (
+                <CapacityBooking tour={tour} />
+              )}
             </div>
           </div>
     </div>

@@ -2,10 +2,10 @@ import Link from "next/link";
 import BannerCarousel from "@/components/BannerCarousel";
 import TourCard from "@/components/TourCard";
 import ReviewsSection from "@/components/ReviewsSection";
-import { getPublishedTours, getActiveBanners, getActiveReviews } from "@/lib/tours";
+import SeferSearch from "@/components/SeferSearch";
+import { getPublishedTours, getActiveBanners, getActiveReviews, getSeferler } from "@/lib/tours";
 import { getGoogleBusiness } from "@/lib/google-reviews";
 import {
-  SearchIcon,
   TicketIcon,
   ShieldIcon,
   HeadsetIcon,
@@ -15,11 +15,12 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [tours, banners, manualReviews, google] = await Promise.all([
+  const [tours, banners, manualReviews, google, seferler] = await Promise.all([
     getPublishedTours(),
     getActiveBanners(),
     getActiveReviews(),
     getGoogleBusiness(),
+    getSeferler(),
   ]);
   // Google API varsa canlı yorum/puanı kullan; yoksa elle girilen yorumlara düş.
   const reviews =
@@ -38,44 +39,22 @@ export default async function Home() {
               "radial-gradient(circle at 20% 20%, rgba(255,255,255,.35), transparent 40%), radial-gradient(circle at 80% 0%, rgba(106,31,52,.6), transparent 45%)",
           }}
         />
-        <div className="relative mx-auto max-w-3xl px-4 py-7 text-center md:py-16">
+        <div className="relative mx-auto max-w-3xl px-4 pb-16 pt-7 text-center md:pb-24 md:pt-16">
           <h1 className="text-xl font-extrabold text-white sm:text-2xl md:text-4xl">
             Hayalinizdeki tura çıkın
           </h1>
           <p className="mx-auto mt-1.5 max-w-xl text-xs text-white/80 sm:text-sm md:text-base">
             Yurt içi ve yurt dışı turlarımız arasında arayın; online koltuk seçin, güvenle ödeyin.
           </p>
-
-          <form
-            action="/turlar"
-            className="mx-auto mt-4 flex max-w-2xl flex-col gap-3 rounded-2xl bg-white p-2.5 shadow-xl sm:mt-6 sm:flex-row sm:items-center"
-          >
-            <div className="relative flex-1">
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-                <SearchIcon width={20} height={20} />
-              </span>
-              <input
-                name="q"
-                placeholder="Tur adı veya destinasyon ara (örn. Kapadokya, Balkan)"
-                className="w-full rounded-xl border border-transparent bg-slate-50 py-3.5 pl-12 pr-4 text-base text-slate-800 outline-none transition focus:border-brand focus:bg-white"
-              />
-            </div>
-            <button className="flex items-center justify-center gap-2 rounded-xl bg-accent px-8 py-3.5 text-base font-semibold text-white transition hover:bg-accent-dark">
-              <SearchIcon width={18} height={18} />
-              Tur Ara
-            </button>
-          </form>
-
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-white/70">
-            <span>Popüler:</span>
-            <QuickSearch label="Kapadokya" />
-            <QuickSearch label="Karadeniz" />
-            <QuickSearch label="Balkan" />
-          </div>
         </div>
       </div>
 
       <div className="mx-auto max-w-6xl px-4 py-6">
+        {/* Arama: tur adı/destinasyon + nereden/nereye seferler */}
+        <section className="relative z-10 mx-auto -mt-10 max-w-3xl md:-mt-14">
+          <SeferSearch seferler={seferler} />
+        </section>
+
         {/* Kampanyalar (afişler — 4:5 Instagram formatı) */}
         {banners.length > 0 && (
           <section className="mt-4">
@@ -138,17 +117,6 @@ export default async function Home() {
       </div>
       </div>
     </div>
-  );
-}
-
-function QuickSearch({ label }: { label: string }) {
-  return (
-    <Link
-      href={`/turlar?q=${encodeURIComponent(label)}`}
-      className="rounded-full border border-white/25 px-3 py-1 font-medium text-white/90 transition hover:bg-white/15"
-    >
-      {label}
-    </Link>
   );
 }
 

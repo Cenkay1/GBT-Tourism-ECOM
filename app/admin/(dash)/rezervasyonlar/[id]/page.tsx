@@ -124,6 +124,15 @@ export default async function BookingDetail({
             <p className="mt-1 text-sm text-slate-500">
               Kalkış: {formatDate(b.tour.departureDate.toISOString())}
             </p>
+            {b.boardingName && (
+              <p className="mt-1 text-sm text-slate-500">
+                Güzergâh:{" "}
+                <span className="font-medium text-slate-700">
+                  {b.boardingName}
+                  {b.dropoffName ? ` → ${b.dropoffName}` : ""}
+                </span>
+              </p>
+            )}
             <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
               <span className="text-sm text-slate-500">Toplam</span>
               <span className="text-lg font-extrabold text-accent">

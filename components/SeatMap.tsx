@@ -10,6 +10,8 @@ import {
   vehicleLabel,
   seatNeighbor,
   genderLabel,
+  orderedStops,
+  segmentPrice,
 } from "@/lib/shared";
 import { BusIcon } from "@/components/Icons";
 import BoardingSelector from "@/components/BoardingSelector";
@@ -21,7 +23,15 @@ interface Picked {
   gender: Gender;
 }
 
-export default function SeatMap({ tour }: { tour: Tour }) {
+export default function SeatMap({
+  tour,
+  initialFrom = null,
+  initialTo = null,
+}: {
+  tour: Tour;
+  initialFrom?: string | null;
+  initialTo?: string | null;
+}) {
   const rows = useMemo(() => buildSeatGrid(tour), [tour]);
   const [selected, setSelected] = useState<Picked[]>([]);
   const [picking, setPicking] = useState<string | null>(null);
@@ -31,13 +41,33 @@ export default function SeatMap({ tour }: { tour: Tour }) {
   const layout = tour.seatLayout ?? "2+2";
   const takenGenders = tour.seatGenders ?? {};
 
-  // Biniş durakları (varsa) — seçime göre kişi başı fiyat değişir.
-  const stops = (tour.places ?? []).filter((p) => p.type === "DURAK");
+  // Biniş/iniş durakları (sıralı) — seçime göre kişi başı fiyat değişir.
+  const stops = orderedStops(tour.places ?? []);
+  const isSefer = tour.type === "SEFER";
   const [boardingId, setBoardingId] = useState<string | null>(
-    stops.length ? stops[0].id : null
+    initialFrom ?? (stops.length ? stops[0].id : null)
   );
-  const boardingStop = stops.find((s) => s.id === boardingId);
-  const unitPrice = boardingStop?.price ?? tour.price;
+  const [dropoffId, setDropoffId] = useState<string | null>(initialTo ?? null);
+
+  // Sefer: her ikisi de seçiliyse direkt koltuğa; tur: durak yoksa direkt koltuğa.
+  const canPreselect = isSefer
+    ? Boolean(initialFrom && initialTo)
+    : stops.length === 0;
+  const [step, setStep] = useState<1 | 2>(canPreselect ? 2 : 1);
+
+  const fromIdx = stops.findIndex((s) => s.id === boardingId);
+  const toIdx = stops.findIndex((s) => s.id === dropoffId);
+  const boardingStop = stops[fromIdx];
+  const dropoffStop = stops[toIdx];
+
+  const unitPrice = isSefer
+    ? fromIdx >= 0 && toIdx > fromIdx
+      ? segmentPrice(tour.segmentPrices, fromIdx, toIdx, tour.price)
+      : tour.price
+    : boardingStop?.price ?? tour.price;
+
+  // Sefer'de Adım 1'i geçmek için geçerli from<to şart.
+  const routeReady = isSefer ? fromIdx >= 0 && toIdx > fromIdx : true;
 
   function isSelected(code: string) {
     return selected.some((s) => s.code === code);
@@ -85,6 +115,7 @@ export default function SeatMap({ tour }: { tour: Tour }) {
     const koltuklar = selected.map((s) => `${s.code}:${s.gender}`).join(",");
     const params = new URLSearchParams({ tur: tour.slug, koltuklar });
     if (boardingId) params.set("durak", boardingId);
+    if (isSefer && dropoffId) params.set("inis", dropoffId);
     router.push(`/rezervasyon?${params}`);
   }
 
@@ -108,14 +139,78 @@ export default function SeatMap({ tour }: { tour: Tour }) {
 
   return (
     <div className="space-y-6">
-      {stops.length > 0 && (
-        <BoardingSelector
-          places={tour.places ?? []}
-          value={boardingId}
-          onChange={setBoardingId}
-          basePrice={tour.price}
-          currency={tour.currency}
-        />
+      {step === 1 ? (
+        <div className="space-y-4">
+          {isSefer ? (
+            <>
+              <StopList
+                title="Nereden bineceksiniz?"
+                stops={stops.slice(0, Math.max(0, stops.length - 1))}
+                value={boardingId}
+                onChange={(id) => {
+                  setBoardingId(id);
+                  const fi = stops.findIndex((s) => s.id === id);
+                  const ti = stops.findIndex((s) => s.id === dropoffId);
+                  if (ti <= fi) setDropoffId(null);
+                }}
+              />
+              <StopList
+                title="Nereye ineceksiniz?"
+                stops={stops.filter((_, i) => i > fromIdx)}
+                value={dropoffId}
+                onChange={setDropoffId}
+              />
+              {routeReady && (
+                <div className="rounded-2xl bg-white p-4 text-sm shadow-sm ring-1 ring-black/5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">
+                      {boardingStop?.name} → {dropoffStop?.name}
+                    </span>
+                    <span className="font-bold text-accent">
+                      {formatPrice(unitPrice, tour.currency)} / kişi
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <BoardingSelector
+              places={tour.places ?? []}
+              value={boardingId}
+              onChange={setBoardingId}
+              basePrice={tour.price}
+              currency={tour.currency}
+            />
+          )}
+          <button
+            type="button"
+            disabled={!routeReady}
+            onClick={() => setStep(2)}
+            className="w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition enabled:hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            İleri — Koltuk Seç
+          </button>
+          {isSefer && !routeReady && (
+            <p className="text-center text-xs text-slate-400">
+              Devam etmek için nereden ve nereye seçin.
+            </p>
+          )}
+        </div>
+      ) : (
+      <div className="space-y-6">
+      {(isSefer || stops.length > 0) && (
+        <button
+          type="button"
+          onClick={() => setStep(1)}
+          className="text-sm font-semibold text-brand hover:underline"
+        >
+          ← Güzergâhı değiştir
+          {isSefer && boardingStop && dropoffStop
+            ? ` (${boardingStop.name} → ${dropoffStop.name})`
+            : boardingStop
+            ? ` (${boardingStop.name})`
+            : ""}
+        </button>
       )}
       <div className="grid gap-6 md:grid-cols-[1fr_260px]">
       {/* Araç şeması */}
@@ -202,6 +297,7 @@ export default function SeatMap({ tour }: { tour: Tour }) {
         <div className="mt-4 space-y-1 border-t border-slate-100 pt-4 text-sm">
           <Row label="Koltuk" value={`${selected.length} adet`} />
           {boardingStop && <Row label="Biniş" value={boardingStop.name} />}
+          {isSefer && dropoffStop && <Row label="İniş" value={dropoffStop.name} />}
           <Row label="Kişi başı" value={formatPrice(unitPrice, tour.currency)} />
           <div className="flex items-center justify-between pt-2 text-base font-extrabold text-brand">
             <span>Toplam</span>
@@ -254,6 +350,54 @@ export default function SeatMap({ tour }: { tour: Tour }) {
           </div>
         </div>
       )}
+      </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
+function StopList({
+  title,
+  stops,
+  value,
+  onChange,
+}: {
+  title: string;
+  stops: { id: string; name: string }[];
+  value: string | null;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5">
+      <h3 className="font-bold text-brand">{title}</h3>
+      <div className="mt-3 flex flex-col gap-2">
+        {stops.length === 0 ? (
+          <p className="text-sm text-slate-400">Önce nereden seçin.</p>
+        ) : (
+          stops.map((s) => {
+            const active = value === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => onChange(s.id)}
+                className={`flex items-center gap-2.5 rounded-xl border px-4 py-3 text-left transition ${
+                  active ? "border-accent bg-accent/10" : "border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span
+                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                    active ? "border-accent" : "border-slate-300"
+                  }`}
+                >
+                  {active && <span className="h-2.5 w-2.5 rounded-full bg-accent" />}
+                </span>
+                <span className="text-sm font-semibold text-slate-700">{s.name}</span>
+              </button>
+            );
+          })
+        )}
       </div>
     </div>
   );

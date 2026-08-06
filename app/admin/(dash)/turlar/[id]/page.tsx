@@ -59,6 +59,8 @@ export default async function EditTourPage({
     seatRows: t.seatRows ?? undefined,
     features: JSON.parse(t.features || "[]"),
     excludedFeatures: JSON.parse(t.excludedFeatures || "[]"),
+    type: t.type,
+    segmentPrices: JSON.parse(t.segmentPrices || "[]"),
     status: t.status,
     places: t.places.map((p) => ({
       type: p.type === "OTEL" ? ("OTEL" as const) : ("DURAK" as const),

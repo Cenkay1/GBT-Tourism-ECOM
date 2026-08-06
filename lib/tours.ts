@@ -10,7 +10,9 @@ import type {
   TourPlace,
   PlaceType,
   Amenity,
+  TourKind,
 } from "@/lib/shared";
+import { parseSegments } from "@/lib/shared";
 import { releaseExpiredHolds } from "@/lib/booking";
 
 export type {
@@ -35,6 +37,8 @@ export {
   mapEmbedUrl,
   mapLinkUrl,
   VEHICLES,
+  orderedStops,
+  segmentPrice,
 } from "@/lib/shared";
 
 type TourRow = {
@@ -60,6 +64,8 @@ type TourRow = {
   seatRows: number | null;
   features: string;
   excludedFeatures: string;
+  type: string;
+  segmentPrices: string;
   status: string;
 };
 
@@ -82,6 +88,7 @@ function toTour(
     places?: TourPlace[];
     amenities?: Amenity[];
     excludedAmenities?: Amenity[];
+    availableSeats?: number;
   }
 ): Tour {
   return {
@@ -102,6 +109,9 @@ function toTour(
     description: row.description,
     highlights: parseJsonArray(row.highlights),
     status: row.status,
+    type: (row.type as TourKind) ?? "TUR",
+    segmentPrices: parseSegments(row.segmentPrices),
+    availableSeats: extra?.availableSeats,
     capacity: row.capacity ?? undefined,
     vehicleType: (row.vehicleType as VehicleType | null) ?? undefined,
     seatLayout: row.seatLayout ?? undefined,
@@ -199,7 +209,7 @@ export async function getPublishedTours(filters?: {
   q?: string;
 }): Promise<Tour[]> {
   const rows = await prisma.tour.findMany({
-    where: { status: "YAYINDA" },
+    where: { status: "YAYINDA", type: "TUR" },
     orderBy: { departureDate: "asc" },
   });
 
@@ -295,6 +305,30 @@ export async function getTourBySlug(slug: string): Promise<Tour | null> {
     places,
     amenities,
     excludedAmenities,
+  });
+}
+
+// Yayındaki seferler (type=SEFER). Yatay kartlar için places + boş koltuk sayısı dolu.
+export async function getSeferler(): Promise<Tour[]> {
+  await releaseExpiredHolds();
+  const rows = await prisma.tour.findMany({
+    where: { status: "YAYINDA", type: "SEFER" },
+    orderBy: { departureDate: "asc" },
+    include: { seats: true, places: { orderBy: { sortOrder: "asc" } } },
+  });
+  return rows.map((row) => {
+    const availableSeats = row.seats.filter((s) => s.status === "BOS").length;
+    const places: TourPlace[] = row.places.map((p) => ({
+      id: p.id,
+      type: p.type as PlaceType,
+      name: p.name,
+      address: p.address ?? undefined,
+      mapQuery: p.mapQuery ?? undefined,
+      nights: p.nights ?? undefined,
+      price: p.price ?? undefined,
+      sortOrder: p.sortOrder,
+    }));
+    return toTour(row as TourRow, { places, availableSeats });
   });
 }
 

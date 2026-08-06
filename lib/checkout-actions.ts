@@ -15,6 +15,7 @@ export async function submitCheckout(fd: FormData) {
   const tourId = s(fd, "tourId");
   const bookingType = s(fd, "bookingType");
   const boardingPlaceId = s(fd, "boardingPlaceId") || undefined;
+  const dropoffPlaceId = s(fd, "dropoffPlaceId") || undefined;
   const seatCodes = s(fd, "seatCodes")
     ? s(fd, "seatCodes").split(",").map((c) => c.trim()).filter(Boolean)
     : [];
@@ -43,6 +44,7 @@ export async function submitCheckout(fd: FormData) {
     seatCodes: bookingType === "KOLTUK" ? seatCodes : undefined,
     quantity: bookingType === "KONTENJAN" ? quantity : undefined,
     boardingPlaceId,
+    dropoffPlaceId,
   });
 
   if (!result.ok) {

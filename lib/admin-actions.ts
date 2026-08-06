@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getSessionEmail } from "@/lib/auth";
-import { VEHICLES, VehicleType } from "@/lib/shared";
+import { VEHICLES, VehicleType, parseSegments } from "@/lib/shared";
 import { createManualPaidBooking } from "@/lib/booking";
 
 async function requireAdmin() {
@@ -60,7 +60,11 @@ function parseIdList(raw: string): string[] {
 }
 
 async function tourDataFromForm(fd: FormData) {
-  const bookingType = str(fd, "bookingType");
+  const type = str(fd, "type") === "SEFER" ? "SEFER" : "TUR";
+  // Sefer her zaman koltuk seçimlidir.
+  const bookingType = type === "SEFER" ? "KOLTUK" : str(fd, "bookingType");
+  const segmentPrices =
+    type === "SEFER" ? JSON.stringify(parseSegments(str(fd, "segmentPrices"))) : "[]";
   const images = str(fd, "images")
     .split("\n")
     .map((s) => s.trim())
@@ -101,6 +105,8 @@ async function tourDataFromForm(fd: FormData) {
     seatRows: bookingType === "KOLTUK" ? optNum(fd, "seatRows") : null,
     features: JSON.stringify(features),
     excludedFeatures: JSON.stringify(excludedFeatures),
+    type,
+    segmentPrices,
     status: str(fd, "status") || "YAYINDA",
   };
 }

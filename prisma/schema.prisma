@@ -34,6 +34,8 @@ model Tour {
   seatRows          Int?
   features          String    @default("[]") // seçili özellik id'leri (JSON dizi)
   excludedFeatures  String    @default("[]") // fiyata dahil OLMAYAN özellik id'leri (JSON dizi)
+  type              String    @default("TUR") // TUR | SEFER
+  segmentPrices     String    @default("[]") // JSON: [{ from, to, price }] — sefer segment fiyat matrisi
   status            String    @default("YAYINDA") // TASLAK | YAYINDA
   createdAt         DateTime  @default(now())
 
@@ -77,6 +79,7 @@ model Booking {
   contactEmail  String
   quantity      Int       @default(1)
   boardingName   String?   // yolcunun binis noktasi (secilen DURAK adi)
+  dropoffName    String?   // yolcunun inis noktasi (SEFER icin secilen DURAK adi)
   paymentMethod  String    @default("ONLINE") // ONLINE | NAKIT
   paymentRef     String?
   holdExpiresAt  DateTime?

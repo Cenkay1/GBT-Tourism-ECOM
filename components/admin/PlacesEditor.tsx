@@ -15,12 +15,16 @@ export interface PlaceRow {
 
 export default function PlacesEditor({
   name,
-  initial,
+  value,
+  onChange,
 }: {
   name: string;
-  initial?: PlaceRow[];
+  value: PlaceRow[];
+  onChange: (v: PlaceRow[]) => void;
 }) {
-  const [places, setPlaces] = useState<PlaceRow[]>(initial ?? []);
+  const places = value;
+  const setPlaces = (updater: PlaceRow[] | ((p: PlaceRow[]) => PlaceRow[])) =>
+    onChange(typeof updater === "function" ? updater(places) : updater);
   const [preview, setPreview] = useState<number | null>(null);
 
   const input =

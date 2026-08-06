@@ -49,7 +49,18 @@ export default async function AdminTours() {
                 tours.map((t) => (
                   <tr key={t.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{t.title}</p>
+                      <p className="font-medium text-slate-800">
+                        {t.title}
+                        <span
+                          className={`ml-2 rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                            t.type === "SEFER"
+                              ? "bg-accent/15 text-accent-dark"
+                              : "bg-brand/10 text-brand"
+                          }`}
+                        >
+                          {t.type === "SEFER" ? "SEFER" : "TUR"}
+                        </span>
+                      </p>
                       <p className="text-xs text-slate-400">{t.destination}</p>
                     </td>
                     <td className="px-4 py-3 text-slate-600">

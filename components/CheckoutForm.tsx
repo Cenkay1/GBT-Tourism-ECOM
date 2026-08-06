@@ -35,6 +35,8 @@ export default function CheckoutForm({
   summary,
   boardingPlaceId,
   boardingLabel,
+  dropoffPlaceId,
+  dropoffLabel,
 }: {
   tour: CheckoutTour;
   seats: SeatPick[];
@@ -43,6 +45,8 @@ export default function CheckoutForm({
   summary: CheckoutSummary;
   boardingPlaceId?: string;
   boardingLabel?: string;
+  dropoffPlaceId?: string;
+  dropoffLabel?: string;
 }) {
   const isSeat = tour.bookingType === "KOLTUK";
   const count = isSeat ? seats.length : quantity;
@@ -102,6 +106,7 @@ export default function CheckoutForm({
       <input type="hidden" name="seatCodes" value={isSeat ? seats.map((s) => s.code).join(",") : ""} />
       <input type="hidden" name="quantity" value={String(quantity)} />
       {boardingPlaceId && <input type="hidden" name="boardingPlaceId" value={boardingPlaceId} />}
+      {dropoffPlaceId && <input type="hidden" name="dropoffPlaceId" value={dropoffPlaceId} />}
       {genders.map((g, i) => (
         <input key={i} type="hidden" name={`p_${i}_gender`} value={g} />
       ))}
@@ -202,6 +207,9 @@ export default function CheckoutForm({
           <p className="mt-1 text-xs text-slate-500">Kalkış: {summary.departureLabel}</p>
           {boardingLabel && (
             <p className="text-xs text-slate-500">Biniş: {boardingLabel}</p>
+          )}
+          {dropoffLabel && (
+            <p className="text-xs text-slate-500">İniş: {dropoffLabel}</p>
           )}
         </div>
         <div className="mt-3 space-y-1 text-sm text-slate-500">

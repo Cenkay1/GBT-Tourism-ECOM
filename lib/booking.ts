@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { isValidId, isValidPhone, seatNeighbor, genderLabel } from "@/lib/shared";
+import { isValidId, isValidPhone, seatNeighbor, genderLabel, parseSegments, segmentPrice } from "@/lib/shared";
 
 export const HOLD_MINUTES = 15;
 
@@ -20,6 +20,7 @@ export interface CreateBookingInput {
   seatCodes?: string[]; // KOLTUK turları için
   quantity?: number; // KONTENJAN turları için
   boardingPlaceId?: string; // seçilen biniş durağı (fiyatı buradan belirlenir)
+  dropoffPlaceId?: string; // SEFER: seçilen iniş durağı
   allowBlocked?: boolean; // acente elden satışı: BLOKE koltuklar da satılabilir
 }
 
@@ -87,7 +88,22 @@ export async function createPendingBooking(
   // Biniş durağı bazlı fiyat: seçilen DURAK'ın fiyatı varsa onu kullan, yoksa tur fiyatı.
   let unitPrice = tour.price;
   let boardingName: string | null = null;
-  if (input.boardingPlaceId) {
+  let dropoffName: string | null = null;
+  if (tour.type === "SEFER" && input.boardingPlaceId && input.dropoffPlaceId) {
+    // Sefer: sıralı duraklardan (from<to) segment fiyatı uygulanır.
+    const stops = await prisma.tourPlace.findMany({
+      where: { tourId: tour.id, type: "DURAK" },
+      orderBy: { sortOrder: "asc" },
+    });
+    const fromIdx = stops.findIndex((s) => s.id === input.boardingPlaceId);
+    const toIdx = stops.findIndex((s) => s.id === input.dropoffPlaceId);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx >= toIdx)
+      return { ok: false, error: "Geçersiz güzergâh seçimi (nereden/nereye)." };
+    boardingName = stops[fromIdx].name;
+    dropoffName = stops[toIdx].name;
+    unitPrice = segmentPrice(parseSegments(tour.segmentPrices), fromIdx, toIdx, tour.price);
+  } else if (input.boardingPlaceId) {
+    // Tur: biniş durağı bazlı fiyat.
     const place = await prisma.tourPlace.findFirst({
       where: { id: input.boardingPlaceId, tourId: tour.id, type: "DURAK" },
     });
@@ -163,6 +179,7 @@ export async function createPendingBooking(
           contactEmail: input.contactEmail,
           quantity: codes.length,
           boardingName,
+          dropoffName,
           holdExpiresAt,
           passengers: {
             create: input.passengers.map((p, i) => ({
@@ -220,6 +237,7 @@ export async function createPendingBooking(
         contactEmail: input.contactEmail,
         quantity: qty,
         boardingName,
+        dropoffName,
         holdExpiresAt,
         passengers: {
           create: input.passengers.map((p) => ({

@@ -4,8 +4,9 @@ import { useState } from "react";
 import ImageUpload from "@/components/admin/ImageUpload";
 import GalleryUpload from "@/components/admin/GalleryUpload";
 import PlacesEditor, { PlaceRow } from "@/components/admin/PlacesEditor";
+import SegmentPriceEditor from "@/components/admin/SegmentPriceEditor";
 import MapField from "@/components/admin/MapField";
-import type { Amenity } from "@/lib/shared";
+import type { Amenity, SegmentPrice } from "@/lib/shared";
 
 export interface TourFormValues {
   title?: string;
@@ -29,6 +30,8 @@ export interface TourFormValues {
   places?: PlaceRow[];
   features?: string[];
   excludedFeatures?: string[];
+  type?: string;
+  segmentPrices?: SegmentPrice[];
 }
 
 export default function TourForm({
@@ -45,6 +48,10 @@ export default function TourForm({
   const [bookingType, setBookingType] = useState(initial?.bookingType ?? "KOLTUK");
   const [features, setFeatures] = useState<string[]>(initial?.features ?? []);
   const [excluded, setExcluded] = useState<string[]>(initial?.excludedFeatures ?? []);
+  const [type, setType] = useState(initial?.type ?? "TUR");
+  const [places, setPlaces] = useState<PlaceRow[]>(initial?.places ?? []);
+  const [segments, setSegments] = useState<SegmentPrice[]>(initial?.segmentPrices ?? []);
+  const isSefer = type === "SEFER";
 
   function toggleFeature(id: string) {
     setFeatures((prev) =>
@@ -68,6 +75,16 @@ export default function TourForm({
   return (
     <form action={action} className="space-y-6">
       <Card title="Genel Bilgiler">
+        <input type="hidden" name="type" value={type} />
+        <div className="mb-4 flex flex-wrap gap-3">
+          <TypeChip current={type} value="TUR" label="Tur" onSelect={setType} />
+          <TypeChip current={type} value="SEFER" label="Sefer (Rota)" onSelect={setType} />
+        </div>
+        <p className="mb-4 text-xs text-slate-400">
+          {isSefer
+            ? "Sefer: sıralı duraklı, nereden→nereye segment fiyatlı, koltuklu yolculuk."
+            : "Tur: paket gezi. Yolcu bir duraktan biner; farklı yerde inemez."}
+        </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className={label}>
             Tur Başlığı *
@@ -133,13 +150,24 @@ export default function TourForm({
       </Card>
 
       <Card title="Rezervasyon Tipi">
-        <div className="flex flex-wrap gap-3">
-          <TypeChip current={bookingType} value="KOLTUK" label="Koltuk Seçimli" onSelect={setBookingType} />
-          <TypeChip current={bookingType} value="KONTENJAN" label="Kontenjanlı" onSelect={setBookingType} />
-        </div>
-        <input type="hidden" name="bookingType" value={bookingType} />
+        {isSefer ? (
+          <>
+            <input type="hidden" name="bookingType" value="KOLTUK" />
+            <p className="text-sm text-slate-500">
+              Seferler koltuk seçimlidir. Araç ve sıra bilgisini aşağıdan girin.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-3">
+              <TypeChip current={bookingType} value="KOLTUK" label="Koltuk Seçimli" onSelect={setBookingType} />
+              <TypeChip current={bookingType} value="KONTENJAN" label="Kontenjanlı" onSelect={setBookingType} />
+            </div>
+            <input type="hidden" name="bookingType" value={bookingType} />
+          </>
+        )}
 
-        {bookingType === "KOLTUK" ? (
+        {(isSefer || bookingType === "KOLTUK") ? (
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <label className={label}>
               Araç Tipi
@@ -290,8 +318,14 @@ export default function TourForm({
           Turun durakları ve (konaklamalıysa) otelleri. Her biri tur sayfasında haritada gösterilir.
           Her durağa <strong>biniş fiyatı</strong> girebilirsiniz; müşteri o duraktan binmeyi seçince o fiyat uygulanır (boş bırakılırsa tur fiyatı geçerli).
         </p>
-        <PlacesEditor name="places" initial={initial?.places} />
+        <PlacesEditor name="places" value={places} onChange={setPlaces} />
       </Card>
+
+      {isSefer && (
+        <Card title="Segment Fiyatları (Nereden → Nereye)">
+          <SegmentPriceEditor name="segmentPrices" places={places} value={segments} onChange={setSegments} />
+        </Card>
+      )}
 
       <div className="flex gap-3">
         <button className="rounded-lg bg-accent px-6 py-2.5 text-sm font-bold text-white hover:bg-accent-dark">

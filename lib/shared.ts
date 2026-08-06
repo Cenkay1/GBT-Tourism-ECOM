@@ -3,6 +3,14 @@
 export type Category = "YURT_ICI" | "YURT_DISI";
 export type BookingType = "KOLTUK" | "KONTENJAN";
 export type SeatStatus = "BOS" | "KILITLI" | "SATILDI" | "BLOKE";
+export type TourKind = "TUR" | "SEFER";
+
+// Sefer segment fiyatı: from/to = sıralı DURAK indeksleri (from < to).
+export interface SegmentPrice {
+  from: number;
+  to: number;
+  price: number;
+}
 
 export interface Tour {
   id: string;
@@ -22,6 +30,9 @@ export interface Tour {
   description: string;
   highlights: string[];
   status: string;
+  type: TourKind;
+  segmentPrices: SegmentPrice[];
+  availableSeats?: number; // SEFER kartında boş koltuk rozeti için
   capacity?: number;
   sold?: number;
   vehicleType?: VehicleType;
@@ -220,4 +231,43 @@ export function formatDate(iso: string): string {
 
 export function categoryLabel(c: Category): string {
   return c === "YURT_ICI" ? "Yurt İçi" : "Yurt Dışı";
+}
+
+// Sıralı biniş/iniş durakları (yalnız DURAK, sortOrder artan).
+export function orderedStops(places: TourPlace[] = []): TourPlace[] {
+  return places
+    .filter((p) => p.type === "DURAK")
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+// JSON segment matrisini güvenle ayrıştır.
+export function parseSegments(raw: string): SegmentPrice[] {
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((s) => ({ from: Number(s.from), to: Number(s.to), price: Number(s.price) }))
+      .filter(
+        (s) =>
+          Number.isInteger(s.from) &&
+          Number.isInteger(s.to) &&
+          s.from >= 0 &&
+          s.to > s.from &&
+          Number.isFinite(s.price) &&
+          s.price >= 0
+      );
+  } catch {
+    return [];
+  }
+}
+
+// (from,to) segmentinin fiyatı; matriste yoksa tur taban fiyatı.
+export function segmentPrice(
+  segments: SegmentPrice[],
+  fromIdx: number,
+  toIdx: number,
+  basePrice: number
+): number {
+  const seg = segments.find((s) => s.from === fromIdx && s.to === toIdx);
+  return seg?.price ?? basePrice;
 }

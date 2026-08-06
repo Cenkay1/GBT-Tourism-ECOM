@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getTourBySlug, formatPrice, formatDate } from "@/lib/tours";
+import { getTourBySlug, formatPrice, formatDate, orderedStops, segmentPrice } from "@/lib/tours";
 import { Gender } from "@/lib/shared";
 import { submitCheckout } from "@/lib/checkout-actions";
 import CheckoutForm from "@/components/CheckoutForm";
@@ -10,18 +10,25 @@ export const dynamic = "force-dynamic";
 export default async function CheckoutPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tur?: string; koltuklar?: string; adet?: string; durak?: string }>;
+  searchParams: Promise<{ tur?: string; koltuklar?: string; adet?: string; durak?: string; inis?: string }>;
 }) {
-  const { tur, koltuklar, adet, durak } = await searchParams;
+  const { tur, koltuklar, adet, durak, inis } = await searchParams;
   if (!tur) notFound();
   const tour = await getTourBySlug(tur);
   if (!tour) notFound();
 
-  // Biniş durağı (varsa) → kişi başı fiyat buradan belirlenir.
-  const boardingStop = durak
-    ? (tour.places ?? []).find((p) => p.id === durak && p.type === "DURAK")
-    : undefined;
-  const unitPrice = boardingStop?.price ?? tour.price;
+  // Biniş/iniş durağı (varsa) → kişi başı fiyat buradan belirlenir.
+  const stops = orderedStops(tour.places ?? []);
+  const boardingStop = durak ? stops.find((p) => p.id === durak) : undefined;
+  const dropoffStop = inis ? stops.find((p) => p.id === inis) : undefined;
+  let unitPrice = tour.price;
+  if (tour.type === "SEFER" && boardingStop && dropoffStop) {
+    const fromIdx = stops.indexOf(boardingStop);
+    const toIdx = stops.indexOf(dropoffStop);
+    unitPrice = segmentPrice(tour.segmentPrices, fromIdx, toIdx, tour.price);
+  } else if (boardingStop) {
+    unitPrice = boardingStop.price ?? tour.price;
+  }
 
   // "5A:E,5B:K" → [{code:"5A",gender:"E"}, ...]
   const seats =
@@ -78,6 +85,8 @@ export default async function CheckoutPage({
           action={submitCheckout}
           boardingPlaceId={boardingStop?.id}
           boardingLabel={boardingStop?.name}
+          dropoffPlaceId={dropoffStop?.id}
+          dropoffLabel={dropoffStop?.name}
           summary={{
             title: tour.title,
             destination: tour.destination,
