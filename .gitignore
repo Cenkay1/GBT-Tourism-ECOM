@@ -49,3 +49,6 @@ dev.db
 
 # Python sanal ortamı (yerel, build'e dahil değil)
 .venv/
+
+# iyzico ham logo paketi — kullanılanlar public/payment/ altına kopyalandı
+/iyzico-logo-pack

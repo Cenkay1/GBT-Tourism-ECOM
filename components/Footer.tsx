@@ -52,6 +52,25 @@ export default function Footer() {
           </div>
         </div>
       </div>
+      {/* Yasal linkler + güvenli ödeme bandı */}
+      <div className="border-t border-white/15">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 px-4 py-6 md:flex-row md:justify-between">
+          <ul className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-white/70">
+            <li><Link href="/mesafeli-satis" className="hover:text-white">Mesafeli Satış Sözleşmesi</Link></li>
+            <li><Link href="/teslimat-iade" className="hover:text-white">Teslimat ve İade Şartları</Link></li>
+            <li><Link href="/gizlilik" className="hover:text-white">Gizlilik &amp; KVKK</Link></li>
+          </ul>
+          {/* Renkli ödeme bandı beyaz rozet içinde: lacivert footer üzerinde
+              kart markalarının renkleri doğru görünsün. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/payment/logo_band_colored.svg"
+            alt="Visa, MasterCard, Troy ve iyzico ile güvenli ödeme"
+            className="h-7 w-auto rounded-md bg-white px-2 py-1"
+          />
+        </div>
+      </div>
+
       <div className="border-t border-white/15 py-4 text-center text-xs text-white/60">
         © {new Date().getFullYear()} {COMPANY.name}. Tüm hakları saklıdır.
       </div>

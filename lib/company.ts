@@ -13,6 +13,16 @@ export const COMPANY = {
     youtube: "https://www.youtube.com/@gozdemburakturizm5657",
   },
   instagramHandle: "@gozdemburakturizm",
+  // Yasal/kurumsal kimlik bilgileri (sözleşme sayfalarında kullanılır).
+  // null olanlar henüz temin edilmedi; sayfalarda "—" olarak gösterilir.
+  legal: {
+    title: "BURAK TOUR SEYAHAT ACENTASI TURİZM LOJİSTİK TİCARET LİMİTED ŞİRKETİ",
+    taxOffice: "Karadeniz Ereğli Vergi Dairesi Müdürlüğü",
+    taxNo: "1900661898", // VKN
+    mersis: "0190066189800019" as string | null,
+    tursab: "8343" as string | null, // TURSAB işletme belgesi no
+    kep: null as string | null, // KEP adresi
+  },
   google: {
     rating: 4.8, // Google puanı — gerçek değeri girin
     reviewCount: 501,
