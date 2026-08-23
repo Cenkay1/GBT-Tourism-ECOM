@@ -4,6 +4,7 @@ import { useState } from "react";
 import ImageUpload from "@/components/admin/ImageUpload";
 import GalleryUpload from "@/components/admin/GalleryUpload";
 import PlacesEditor, { PlaceRow } from "@/components/admin/PlacesEditor";
+import BoardingPointsEditor from "@/components/admin/BoardingPointsEditor";
 import MapField from "@/components/admin/MapField";
 import type { Amenity } from "@/lib/shared";
 
@@ -25,6 +26,9 @@ export interface TourFormValues {
   capacity?: number;
   vehicleType?: string;
   seatRows?: number;
+  doorAfterRow?: number;
+  backRowFull?: boolean;
+  singleSupplement?: number;
   status?: string;
   places?: PlaceRow[];
   features?: string[];
@@ -45,6 +49,13 @@ export default function TourForm({
   const [bookingType, setBookingType] = useState(initial?.bookingType ?? "KOLTUK");
   const [features, setFeatures] = useState<string[]>(initial?.features ?? []);
   const [excluded, setExcluded] = useState<string[]>(initial?.excludedFeatures ?? []);
+  const initialPlaces = initial?.places ?? [];
+  const [routePlaces, setRoutePlaces] = useState<PlaceRow[]>(
+    initialPlaces.filter((p) => p.type !== "BINIS")
+  );
+  const [boardingPlaces, setBoardingPlaces] = useState<PlaceRow[]>(
+    initialPlaces.filter((p) => p.type === "BINIS")
+  );
 
   function toggleFeature(id: string) {
     setFeatures((prev) =>
@@ -129,6 +140,11 @@ export default function TourForm({
               <option value="USD">$ USD</option>
             </select>
           </label>
+          <label className={label}>
+            Tek Kişilik Konaklama Farkı (₺)
+            <input name="singleSupplement" type="number" min={0} defaultValue={initial?.singleSupplement ?? 2000} className={input} />
+            <span className="mt-1 block text-xs text-slate-400">Otelli turlarda tek kişilik konaklama seçen müşteriye eklenir.</span>
+          </label>
         </div>
       </Card>
 
@@ -152,6 +168,15 @@ export default function TourForm({
             <label className={label}>
               Sıra Sayısı
               <input name="seatRows" type="number" min={1} max={20} defaultValue={initial?.seatRows ?? 12} className={input} />
+            </label>
+            <label className={label}>
+              Orta Kapı Sırası
+              <input name="doorAfterRow" type="number" min={1} max={20} defaultValue={initial?.doorAfterRow ?? ""} placeholder="Örn. 14" className={input} />
+              <span className="mt-1 block text-xs text-slate-400">Kapı bu sıradan sonra çizilir. Boş = kapı yok.</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-600 sm:col-span-2">
+              <input name="backRowFull" type="checkbox" defaultChecked={initial?.backRowFull} className="h-4 w-4" />
+              Son sırada koridorda da koltuk olsun (tam sıra)
             </label>
             <p className="text-xs text-slate-400 sm:col-span-2">
               Araç tipi koltuk düzenini belirler (Otobüs 4, VIP 3, Minibüs 2 koltuk/sıra). Koltuklar
@@ -285,12 +310,22 @@ export default function TourForm({
         )}
       </Card>
 
+      <input type="hidden" name="places" value={JSON.stringify([...boardingPlaces, ...routePlaces])} />
+
+      <Card title="Biniş Noktaları">
+        <p className="mb-3 text-xs text-slate-400">
+          Müşterinin <strong>&quot;Nereden bineceksiniz?&quot;</strong> adımında seçeceği noktalar.
+          Her birine kişi başı fiyat girebilirsiniz; müşteri o noktadan binmeyi seçince o fiyat uygulanır (boş bırakılırsa tur fiyatı geçerli).
+        </p>
+        <BoardingPointsEditor value={boardingPlaces} onChange={setBoardingPlaces} />
+      </Card>
+
       <Card title="Rota & Konaklama (Harita)">
         <p className="mb-3 text-xs text-slate-400">
-          Turun durakları ve (konaklamalıysa) otelleri. Her biri tur sayfasında haritada gösterilir.
-          Her durağa <strong>biniş fiyatı</strong> girebilirsiniz; müşteri o duraktan binmeyi seçince o fiyat uygulanır (boş bırakılırsa tur fiyatı geçerli).
+          Turun güzergâh durakları ve (konaklamalıysa) otelleri. Her biri tur sayfasında haritada gösterilir.
+          Bu alan yalnızca bilgi/harita amaçlıdır; fiyat biniş noktalarından belirlenir.
         </p>
-        <PlacesEditor name="places" initial={initial?.places} />
+        <PlacesEditor value={routePlaces} onChange={setRoutePlaces} />
       </Card>
 
       <div className="flex gap-3">

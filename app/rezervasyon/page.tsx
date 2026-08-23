@@ -21,7 +21,7 @@ export default async function CheckoutPage({
 
   // Biniş durağı (varsa) → kişi başı fiyat buradan belirlenir.
   const boardingStop = durak
-    ? (tour.places ?? []).find((p) => p.id === durak && p.type === "DURAK")
+    ? (tour.places ?? []).find((p) => p.id === durak && p.type === "BINIS")
     : undefined;
   const unitPrice = boardingStop?.price ?? tour.price;
 
@@ -89,6 +89,11 @@ export default async function CheckoutPage({
           action={submitCheckout}
           boardingPlaceId={boardingStop?.id}
           boardingLabel={boardingStop?.name}
+          unitPrice={unitPrice}
+          departureDate={tour.departureDate}
+          singleSupplement={tour.singleSupplement ?? 2000}
+          hasAccommodation={(tour.places ?? []).some((p) => p.type === "OTEL")}
+          currency={tour.currency}
           defaults={
             user
               ? {

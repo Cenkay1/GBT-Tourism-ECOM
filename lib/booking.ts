@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { isValidId, isValidPhone, seatNeighbor, genderLabel } from "@/lib/shared";
+import { isValidId, isValidPhone, seatNeighbor, genderLabel, priceBooking } from "@/lib/shared";
 
 export const HOLD_MINUTES = 15;
 
@@ -9,6 +9,9 @@ export interface PassengerInput {
   idNumber?: string;
   seatCode?: string;
   gender?: "E" | "K";
+  birthDate?: string; // yyyy-mm-dd
+  nationality?: "TC" | "FOREIGN";
+  country?: string;
 }
 
 export interface CreateBookingInput {
@@ -22,6 +25,7 @@ export interface CreateBookingInput {
   boardingPlaceId?: string; // seçilen biniş durağı (fiyatı buradan belirlenir)
   allowBlocked?: boolean; // acente elden satışı: BLOKE koltuklar da satılabilir
   userId?: string; // giriş yapan müşteri (sadakat için; misafirde undefined)
+  accommodationType?: "SINGLE" | "MULTI"; // konaklamalı turda tek/çok kişi
 }
 
 export type CreateResult =
@@ -68,19 +72,21 @@ export async function createPendingBooking(
     return { ok: false, error: "Bu tur şu anda satışta değil." };
 
   // Sunucu tarafı doğrulama (istemci atlanırsa güvenlik için)
-  const allowPassport = tour.category === "YURT_DISI";
   if (!isValidPhone(input.contactPhone))
     return { ok: false, error: "Geçerli bir telefon numarası girin." };
   for (const p of input.passengers) {
     if (!p.firstName || !p.lastName)
       return { ok: false, error: "Tüm yolcuların ad ve soyadı zorunludur." };
-    if (!p.idNumber || !isValidId(p.idNumber, allowPassport))
+    const foreign = p.nationality === "FOREIGN";
+    if (!p.idNumber || !isValidId(p.idNumber, foreign))
       return {
         ok: false,
-        error: allowPassport
-          ? "Geçerli bir TC Kimlik No (11 hane) veya pasaport no girin."
+        error: foreign
+          ? "Yabancı yolcular için geçerli bir pasaport no girin."
           : "Geçerli bir TC Kimlik No girin (11 hane).",
       };
+    if (foreign && !p.country)
+      return { ok: false, error: "Yabancı uyruklu yolcu için ülke seçin." };
   }
 
   const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
@@ -90,7 +96,7 @@ export async function createPendingBooking(
   let boardingName: string | null = null;
   if (input.boardingPlaceId) {
     const place = await prisma.tourPlace.findFirst({
-      where: { id: input.boardingPlaceId, tourId: tour.id, type: "DURAK" },
+      where: { id: input.boardingPlaceId, tourId: tour.id, type: "BINIS" },
     });
     if (place) {
       boardingName = place.name;
@@ -153,7 +159,13 @@ export async function createPendingBooking(
         }
       }
 
-      const amount = unitPrice * codes.length;
+      const amount = priceBooking({
+        unitPrice,
+        departureDate: tour.departureDate.toISOString(),
+        passengers: input.passengers,
+        accommodationType: input.accommodationType,
+        singleSupplement: tour.singleSupplement,
+      }).total;
       const booking = await tx.booking.create({
         data: {
           tourId: tour.id,
@@ -164,6 +176,7 @@ export async function createPendingBooking(
           contactEmail: input.contactEmail,
           quantity: codes.length,
           boardingName,
+          accommodationType: input.accommodationType ?? null,
           userId: input.userId ?? null,
           holdExpiresAt,
           passengers: {
@@ -173,6 +186,9 @@ export async function createPendingBooking(
               idNumber: p.idNumber || null,
               seatCode: codes[i] ?? null,
               gender: p.gender || null,
+              birthDate: p.birthDate ? new Date(p.birthDate) : null,
+              nationality: p.nationality === "FOREIGN" ? "FOREIGN" : "TC",
+              country: p.nationality === "FOREIGN" ? p.country || null : "Türkiye",
             })),
           },
         },
@@ -211,7 +227,13 @@ export async function createPendingBooking(
         error: `Yeterli kontenjan yok. Kalan: ${Math.max(0, left)} kişi.`,
       };
 
-    const amount = unitPrice * qty;
+    const amount = priceBooking({
+      unitPrice,
+      departureDate: tour.departureDate.toISOString(),
+      passengers: input.passengers,
+      accommodationType: input.accommodationType,
+      singleSupplement: tour.singleSupplement,
+    }).total;
     const booking = await tx.booking.create({
       data: {
         tourId: tour.id,
@@ -222,6 +244,7 @@ export async function createPendingBooking(
         contactEmail: input.contactEmail,
         quantity: qty,
         boardingName,
+        accommodationType: input.accommodationType ?? null,
         userId: input.userId ?? null,
         holdExpiresAt,
         passengers: {
@@ -230,6 +253,9 @@ export async function createPendingBooking(
             lastName: p.lastName,
             idNumber: p.idNumber || null,
             gender: p.gender || null,
+            birthDate: p.birthDate ? new Date(p.birthDate) : null,
+            nationality: p.nationality === "FOREIGN" ? "FOREIGN" : "TC",
+            country: p.nationality === "FOREIGN" ? p.country || null : "Türkiye",
           })),
         },
       },

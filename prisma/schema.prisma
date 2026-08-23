@@ -32,6 +32,9 @@ model Tour {
   vehicleType       String? // OTOBUS | VIP | MINIBUS (KOLTUK turları için)
   seatLayout        String? // 2+2 | 2+1 | 1+1 (araç tipinden türetilir)
   seatRows          Int?
+  doorAfterRow      Int? // orta kapı bu sıradan sonra (null = kapı yok)
+  backRowFull       Boolean   @default(false) // son sırada koridorda ekstra koltuk
+  singleSupplement  Int       @default(2000) // tek kişilik konaklama farkı
   features          String    @default("[]") // seçili özellik id'leri (JSON dizi)
   excludedFeatures  String    @default("[]") // fiyata dahil OLMAYAN özellik id'leri (JSON dizi)
   status            String    @default("YAYINDA") // TASLAK | YAYINDA
@@ -78,6 +81,7 @@ model Booking {
   quantity      Int       @default(1)
   boardingName   String?   // yolcunun binis noktasi (secilen DURAK adi)
   paymentMethod  String    @default("ONLINE") // ONLINE | NAKIT
+  accommodationType String? // SINGLE | MULTI | null (konaklamasız turda null)
   paymentRef     String?
   holdExpiresAt  DateTime?
   reminderSentAt DateTime? // 24s öncesi hatırlatma gönderildi mi
@@ -98,6 +102,9 @@ model Passenger {
   idNumber  String?
   seatCode  String?
   gender    String?
+  birthDate   DateTime?
+  nationality String?   // TC | FOREIGN
+  country     String?   // ülke adı (TC ise "Türkiye")
 }
 
 model Banner {

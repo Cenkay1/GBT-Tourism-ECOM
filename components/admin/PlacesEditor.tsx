@@ -5,22 +5,24 @@ import { mapEmbedUrl } from "@/lib/shared";
 import PlaceAutocomplete from "@/components/admin/PlaceAutocomplete";
 
 export interface PlaceRow {
-  type: "DURAK" | "OTEL";
+  type: "DURAK" | "OTEL" | "BINIS";
   name: string;
   address?: string;
   mapQuery?: string;
   nights?: number;
-  price?: number; // DURAK için biniş noktası bazlı kişi başı fiyat
+  price?: number; // BINIS için biniş noktası bazlı kişi başı fiyat
 }
 
 export default function PlacesEditor({
-  name,
-  initial,
+  value,
+  onChange,
 }: {
-  name: string;
-  initial?: PlaceRow[];
+  value: PlaceRow[];
+  onChange: (rows: PlaceRow[]) => void;
 }) {
-  const [places, setPlaces] = useState<PlaceRow[]>(initial ?? []);
+  const places = value;
+  const setPlaces = (updater: PlaceRow[] | ((p: PlaceRow[]) => PlaceRow[])) =>
+    onChange(typeof updater === "function" ? (updater as (p: PlaceRow[]) => PlaceRow[])(places) : updater);
   const [preview, setPreview] = useState<number | null>(null);
 
   const input =
@@ -49,8 +51,6 @@ export default function PlacesEditor({
 
   return (
     <div>
-      <input type="hidden" name={name} value={JSON.stringify(places)} />
-
       <div className="space-y-3">
         {places.length === 0 && (
           <p className="rounded-lg bg-slate-50 px-3 py-3 text-xs text-slate-400">
@@ -98,17 +98,6 @@ export default function PlacesEditor({
                   onChange={(e) => update(i, { nights: Number(e.target.value) || undefined })}
                   placeholder="Gece"
                   className={`${input} w-24`}
-                />
-              )}
-              {row.type === "DURAK" && (
-                <input
-                  type="number"
-                  min={0}
-                  value={row.price ?? ""}
-                  onChange={(e) => update(i, { price: Number(e.target.value) || undefined })}
-                  placeholder="Fiyat ₺"
-                  title="Bu duraktan binenler için kişi başı fiyat (boş bırakılırsa tur fiyatı geçerli)"
-                  className={`${input} w-28`}
                 />
               )}
               <button

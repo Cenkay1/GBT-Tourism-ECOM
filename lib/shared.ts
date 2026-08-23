@@ -27,6 +27,9 @@ export interface Tour {
   vehicleType?: VehicleType;
   seatLayout?: string;
   seatRows?: number;
+  doorAfterRow?: number;
+  backRowFull?: boolean;
+  singleSupplement?: number;
   soldSeats?: string[]; // müsait olmayan (satılı veya kilitli) koltuklar
   blockedSeats?: string[]; // admin tarafından online satışa kapatılmış koltuklar (BLOKE)
   seatGenders?: Record<string, Gender>; // dolu koltuk → cinsiyet
@@ -77,7 +80,7 @@ export interface Banner {
 
 export type Gender = "E" | "K";
 
-export type PlaceType = "DURAK" | "OTEL";
+export type PlaceType = "DURAK" | "OTEL" | "BINIS";
 
 export interface TourPlace {
   id: string;
@@ -178,7 +181,19 @@ export function buildSeatGrid(tour: Tour): Seat[][] {
     const rowSeats: Seat[] = [];
     for (const c of [...left, "aisle", ...right]) {
       if (c === "aisle") {
-        rowSeats.push({ code: "aisle", status: "BOS" });
+        const isLast = r === tour.seatRows;
+        if (tour.backRowFull && isLast) {
+          const code = `${r}M`;
+          const isTaken = taken.has(code);
+          const isBlocked = !isTaken && blocked.has(code);
+          rowSeats.push({
+            code,
+            status: isTaken ? "SATILDI" : isBlocked ? "BLOKE" : "BOS",
+            gender: isTaken ? genders[code] ?? null : null,
+          });
+        } else {
+          rowSeats.push({ code: "aisle", status: "BOS" });
+        }
         continue;
       }
       const code = `${r}${c}`;
@@ -196,11 +211,12 @@ export function buildSeatGrid(tour: Tour): Seat[][] {
 }
 
 // Bir araç tipi + sıra için tüm koltuk kodlarını sırayla döndürür.
-export function seatCodes(vt: VehicleType, rows: number): string[] {
+export function seatCodes(vt: VehicleType, rows: number, backRowFull = false): string[] {
   const { left, right } = VEHICLES[vt];
   const codes: string[] = [];
   for (let r = 1; r <= rows; r++) {
     for (const c of [...left, ...right]) codes.push(`${r}${c}`);
+    if (backRowFull && r === rows) codes.push(`${r}M`);
   }
   return codes;
 }
@@ -220,4 +236,58 @@ export function formatDate(iso: string): string {
 
 export function categoryLabel(c: Category): string {
   return c === "YURT_ICI" ? "Yurt İçi" : "Yurt Dışı";
+}
+
+// --- Yaş / fiyatlandırma ---
+export function ageOn(birthDate: string, ref: string): number {
+  const b = new Date(birthDate);
+  const r = new Date(ref);
+  let age = r.getFullYear() - b.getFullYear();
+  const m = r.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && r.getDate() < b.getDate())) age--;
+  return age;
+}
+
+export interface PricePassenger {
+  birthDate?: string | null;
+}
+
+export interface PriceResult {
+  total: number;
+  perPassenger: { fare: number; isChild: boolean }[];
+  childCount: number;
+  adultCount: number;
+  supplement: number;
+}
+
+// Rezervasyon tutarını hesaplar (saf; hem istemci hem sunucu kullanır).
+// Çocuk (kalkışta <7): rezervasyonda >=2 tam ücretli yetişkin varsa %50.
+export function priceBooking(input: {
+  unitPrice: number;
+  departureDate: string;
+  passengers: PricePassenger[];
+  accommodationType?: "SINGLE" | "MULTI" | null;
+  singleSupplement?: number;
+}): PriceResult {
+  const { unitPrice, departureDate, passengers } = input;
+  const childFlags = passengers.map(
+    (p) => !!p.birthDate && ageOn(p.birthDate, departureDate) < 7
+  );
+  const adultCount = childFlags.filter((c) => !c).length;
+  const discount = adultCount >= 2;
+  const childFare = Math.round(unitPrice * 0.5);
+  const perPassenger = childFlags.map((isChild) => ({
+    isChild,
+    fare: isChild && discount ? childFare : unitPrice,
+  }));
+  const base = perPassenger.reduce((s, p) => s + p.fare, 0);
+  const supplement =
+    input.accommodationType === "SINGLE" ? input.singleSupplement ?? 0 : 0;
+  return {
+    total: base + supplement,
+    perPassenger,
+    childCount: childFlags.filter(Boolean).length,
+    adultCount,
+    supplement,
+  };
 }

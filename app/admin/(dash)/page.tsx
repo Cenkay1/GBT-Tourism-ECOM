@@ -11,13 +11,29 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminDashboard() {
+export default async function AdminDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<{ donem?: string }>;
+}) {
+  const { donem = "1ay" } = await searchParams;
+  const now = new Date();
+  const since =
+    donem === "1yil"
+      ? new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())
+      : donem === "3yil"
+      ? new Date(now.getFullYear() - 3, now.getMonth(), now.getDate())
+      : donem === "tumu"
+      ? null
+      : new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+  const createdFilter = since ? { createdAt: { gte: since } } : {};
+
   const [tourCount, bannerCount, bookingCount, paidBookings, upcoming] =
     await Promise.all([
       prisma.tour.count(),
       prisma.banner.count(),
-      prisma.booking.count(),
-      prisma.booking.findMany({ where: { status: "ODENDI" } }),
+      prisma.booking.count({ where: createdFilter }),
+      prisma.booking.findMany({ where: { status: "ODENDI", ...createdFilter } }),
       prisma.tour.findMany({
         where: { status: "YAYINDA" },
         orderBy: { departureDate: "asc" },
@@ -32,12 +48,31 @@ export default async function AdminDashboard() {
       <h1 className="text-2xl font-bold text-brand">Yönetim Paneli</h1>
       <p className="mt-1 text-sm text-slate-500">Gözdem Burak Turizm</p>
 
+      <div className="mt-4 flex flex-wrap gap-2">
+        {([
+          ["1ay", "Son 1 Ay"],
+          ["1yil", "Son 1 Yıl"],
+          ["3yil", "Son 3 Yıl"],
+          ["tumu", "Tümü"],
+        ] as const).map(([val, lbl]) => (
+          <Link
+            key={val}
+            href={`/admin?donem=${val}`}
+            className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+              donem === val ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            {lbl}
+          </Link>
+        ))}
+      </div>
+
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Toplam Tur" value={tourCount} icon={<BusIcon width={22} height={22} />} />
         <Stat label="Aktif Afiş" value={bannerCount} icon={<ImageIcon width={22} height={22} />} />
-        <Stat label="Rezervasyon" value={bookingCount} icon={<TicketIcon width={22} height={22} />} />
+        <Stat label="Rezervasyon (dönem)" value={bookingCount} icon={<TicketIcon width={22} height={22} />} />
         <Stat
-          label="Ciro (ödenen)"
+          label="Ciro (dönem, ödenen)"
           value={formatPrice(revenue, "TRY")}
           icon={<WalletIcon width={22} height={22} />}
         />

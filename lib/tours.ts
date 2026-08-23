@@ -58,6 +58,9 @@ type TourRow = {
   vehicleType: string | null;
   seatLayout: string | null;
   seatRows: number | null;
+  doorAfterRow: number | null;
+  backRowFull: boolean;
+  singleSupplement: number;
   features: string;
   excludedFeatures: string;
   status: string;
@@ -106,6 +109,9 @@ function toTour(
     vehicleType: (row.vehicleType as VehicleType | null) ?? undefined,
     seatLayout: row.seatLayout ?? undefined,
     seatRows: row.seatRows ?? undefined,
+    doorAfterRow: row.doorAfterRow ?? undefined,
+    backRowFull: row.backRowFull ?? false,
+    singleSupplement: row.singleSupplement ?? 2000,
     sold: extra?.sold,
     soldSeats: extra?.soldSeats,
     blockedSeats: extra?.blockedSeats,

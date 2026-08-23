@@ -40,12 +40,20 @@ export async function GET(
         "Ad": p.firstName,
         "Soyad": p.lastName,
         "TC / Pasaport": p.idNumber ?? "",
+        "Ülke": p.country ?? "",
         "Cinsiyet": genderLabel[p.gender ?? ""] ?? "",
+        "Doğum Tarihi": p.birthDate ? p.birthDate.toLocaleDateString("tr-TR") : "",
         "Koltuk": p.seatCode ?? "",
         "İletişim (Ad Soyad)": b.contactName,
         "Telefon": b.contactPhone,
         "E-posta": b.contactEmail,
         "Durum": statusLabel[b.status] ?? b.status,
+        "Konaklama":
+          b.accommodationType === "SINGLE"
+            ? "Tek kişilik"
+            : b.accommodationType === "MULTI"
+            ? "Birden fazla"
+            : "",
         "Tutar": b.totalAmount,
         "Para Birimi": tour.currency,
         "Rezervasyon No": b.id.slice(-8).toUpperCase(),
@@ -60,12 +68,15 @@ export async function GET(
       "Ad": "Kayıt yok",
       "Soyad": "",
       "TC / Pasaport": "",
+      "Ülke": "",
       "Cinsiyet": "",
+      "Doğum Tarihi": "",
       "Koltuk": "",
       "İletişim (Ad Soyad)": "",
       "Telefon": "",
       "E-posta": "",
       "Durum": "",
+      "Konaklama": "",
       "Tutar": "",
       "Para Birimi": "",
       "Rezervasyon No": "",
@@ -74,11 +85,12 @@ export async function GET(
   }
 
   const ws = XLSX.utils.json_to_sheet(rows);
-  // Sütun genişlikleri
+  // Sütun genişlikleri (Sıra, Ad, Soyad, TC/Pasaport, Ülke, Cinsiyet, Doğum T.,
+  // Koltuk, İletişim, Telefon, E-posta, Durum, Konaklama, Tutar, Para B., Rez.No, Tarih)
   ws["!cols"] = [
-    { wch: 5 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 8 }, { wch: 8 },
-    { wch: 20 }, { wch: 16 }, { wch: 26 }, { wch: 10 }, { wch: 10 },
-    { wch: 10 }, { wch: 16 }, { wch: 12 },
+    { wch: 5 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }, { wch: 8 },
+    { wch: 12 }, { wch: 8 }, { wch: 20 }, { wch: 16 }, { wch: 26 }, { wch: 10 },
+    { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 16 }, { wch: 12 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Yolcular");

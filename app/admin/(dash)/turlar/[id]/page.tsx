@@ -57,11 +57,19 @@ export default async function EditTourPage({
     capacity: t.capacity ?? undefined,
     vehicleType: t.vehicleType ?? undefined,
     seatRows: t.seatRows ?? undefined,
+    doorAfterRow: t.doorAfterRow ?? undefined,
+    backRowFull: t.backRowFull ?? false,
+    singleSupplement: t.singleSupplement ?? 2000,
     features: JSON.parse(t.features || "[]"),
     excludedFeatures: JSON.parse(t.excludedFeatures || "[]"),
     status: t.status,
     places: t.places.map((p) => ({
-      type: p.type === "OTEL" ? ("OTEL" as const) : ("DURAK" as const),
+      type:
+        p.type === "OTEL"
+          ? ("OTEL" as const)
+          : p.type === "BINIS"
+          ? ("BINIS" as const)
+          : ("DURAK" as const),
       name: p.name,
       address: p.address ?? undefined,
       mapQuery: p.mapQuery ?? undefined,

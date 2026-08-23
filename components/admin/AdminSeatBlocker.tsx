@@ -10,9 +10,11 @@ import { toggleSeatBlock } from "@/lib/admin-actions";
 export default function AdminSeatBlocker({
   tourId,
   rows,
+  doorAfterRow,
 }: {
   tourId: string;
   rows: Seat[][];
+  doorAfterRow?: number;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -44,35 +46,42 @@ export default function AdminSeatBlocker({
         </div>
         <div className="flex flex-col gap-2">
           {rows.map((row, r) => (
-            <div key={r} className="flex items-center gap-2">
-              <span className="w-4 text-right text-[10px] text-slate-400">{r + 1}</span>
-              {row.map((seat, c) =>
-                seat.code === "aisle" ? (
-                  <div key={c} className="w-4" />
-                ) : (
-                  <button
-                    key={c}
-                    type="button"
-                    disabled={
-                      seat.status === "SATILDI" ||
-                      seat.status === "KILITLI" ||
-                      busy === seat.code
-                    }
-                    onClick={() => onClick(seat.code, seat.status)}
-                    title={
-                      seat.status === "SATILDI" || seat.status === "KILITLI"
-                        ? `${seat.code} — dolu`
-                        : seat.status === "BLOKE"
-                        ? `${seat.code} — kapalı (açmak için tıklayın)`
-                        : `${seat.code} — açık (kapatmak için tıklayın)`
-                    }
-                    className={`h-9 w-9 rounded-md text-[10px] font-semibold transition disabled:opacity-60 ${seatClass(
-                      seat.status
-                    )}`}
-                  >
-                    {seat.code}
-                  </button>
-                )
+            <div key={r}>
+              <div className="flex items-center gap-2">
+                <span className="w-4 text-right text-[10px] text-slate-400">{r + 1}</span>
+                {row.map((seat, c) =>
+                  seat.code === "aisle" ? (
+                    <div key={c} className="w-9" />
+                  ) : (
+                    <button
+                      key={c}
+                      type="button"
+                      disabled={
+                        seat.status === "SATILDI" ||
+                        seat.status === "KILITLI" ||
+                        busy === seat.code
+                      }
+                      onClick={() => onClick(seat.code, seat.status)}
+                      title={
+                        seat.status === "SATILDI" || seat.status === "KILITLI"
+                          ? `${seat.code} — dolu`
+                          : seat.status === "BLOKE"
+                          ? `${seat.code} — kapalı (açmak için tıklayın)`
+                          : `${seat.code} — açık (kapatmak için tıklayın)`
+                      }
+                      className={`h-9 w-9 rounded-md text-[10px] font-semibold transition disabled:opacity-60 ${seatClass(
+                        seat.status
+                      )}`}
+                    >
+                      {seat.code}
+                    </button>
+                  )
+                )}
+              </div>
+              {doorAfterRow === r + 1 && (
+                <div className="my-2 flex items-center gap-2 text-[10px] font-semibold text-slate-400">
+                  <span className="h-px flex-1 bg-slate-200" />🚪 Kapı<span className="h-px flex-1 bg-slate-200" />
+                </div>
               )}
             </div>
           ))}

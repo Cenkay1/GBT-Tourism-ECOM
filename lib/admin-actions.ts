@@ -99,6 +99,9 @@ async function tourDataFromForm(fd: FormData) {
     vehicleType,
     seatLayout,
     seatRows: bookingType === "KOLTUK" ? optNum(fd, "seatRows") : null,
+    doorAfterRow: bookingType === "KOLTUK" ? optNum(fd, "doorAfterRow") : null,
+    backRowFull: bookingType === "KOLTUK" ? str(fd, "backRowFull") === "on" : false,
+    singleSupplement: optNum(fd, "singleSupplement") ?? 2000,
     features: JSON.stringify(features),
     excludedFeatures: JSON.stringify(excludedFeatures),
     status: str(fd, "status") || "YAYINDA",
@@ -129,24 +132,27 @@ async function savePlaces(tourId: string, raw: string) {
   await prisma.tourPlace.createMany({
     data: valid.map((p, i) => ({
       tourId,
-      type: p.type === "OTEL" ? "OTEL" : "DURAK",
+      type: p.type === "OTEL" ? "OTEL" : p.type === "BINIS" ? "BINIS" : "DURAK",
       name: p.name.trim(),
       address: p.address?.trim() || null,
       mapQuery: (p.mapQuery?.trim() || p.address?.trim() || p.name.trim()) || null,
       nights: p.type === "OTEL" && p.nights ? Number(p.nights) : null,
-      price: p.type === "DURAK" && p.price ? Math.round(Number(p.price)) : null,
+      price: p.type === "BINIS" && p.price ? Math.round(Number(p.price)) : null,
       sortOrder: i,
     })),
   });
 }
 
-async function generateSeats(tourId: string, vehicleType: string, rows: number) {
+async function generateSeats(tourId: string, vehicleType: string, rows: number, backRowFull: boolean) {
   const v = VEHICLES[vehicleType as VehicleType] ?? VEHICLES.OTOBUS;
   const cols = [...v.left, ...v.right];
   const data = [];
   for (let r = 1; r <= rows; r++) {
     for (const c of cols) {
       data.push({ tourId, code: `${r}${c}`, status: "BOS" });
+    }
+    if (backRowFull && r === rows) {
+      data.push({ tourId, code: `${r}M`, status: "BOS" });
     }
   }
   if (data.length) await prisma.seat.createMany({ data });
@@ -159,7 +165,7 @@ export async function createTour(fd: FormData) {
   const tour = await prisma.tour.create({ data: { ...data, slug } });
 
   if (data.bookingType === "KOLTUK" && data.seatRows) {
-    await generateSeats(tour.id, data.vehicleType ?? "OTOBUS", data.seatRows);
+    await generateSeats(tour.id, data.vehicleType ?? "OTOBUS", data.seatRows, data.backRowFull);
   }
   await savePlaces(tour.id, str(fd, "places"));
   revalidatePath("/");
@@ -184,10 +190,11 @@ export async function updateTour(id: string, fd: FormData) {
     const hasActive = existing?.seats.some((s) => s.status !== "BOS");
     const layoutChanged =
       existing?.vehicleType !== data.vehicleType ||
-      existing?.seatRows !== data.seatRows;
+      existing?.seatRows !== data.seatRows ||
+      existing?.backRowFull !== data.backRowFull;
     if (!hasActive && layoutChanged) {
       await prisma.seat.deleteMany({ where: { tourId: id } });
-      await generateSeats(id, data.vehicleType ?? "OTOBUS", data.seatRows);
+      await generateSeats(id, data.vehicleType ?? "OTOBUS", data.seatRows, data.backRowFull);
     }
   }
   await savePlaces(id, str(fd, "places"));

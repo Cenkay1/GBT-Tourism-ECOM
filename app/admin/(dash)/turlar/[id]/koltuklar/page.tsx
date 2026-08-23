@@ -44,7 +44,7 @@ export default async function SeatManagePage({
             Bu tur için henüz koltuk oluşturulmamış. Turu düzenleyip araç tipi ve sıra sayısını kaydedin.
           </p>
         ) : (
-          <AdminSeatBlocker tourId={tour.id} rows={rows} />
+          <AdminSeatBlocker tourId={tour.id} rows={rows} doorAfterRow={tour.doorAfterRow} />
         )}
       </div>
     </div>

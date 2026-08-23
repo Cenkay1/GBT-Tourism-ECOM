@@ -32,6 +32,9 @@ export async function submitCheckout(fd: FormData) {
       idNumber: s(fd, `p_${i}_id`),
       seatCode: bookingType === "KOLTUK" ? seatCodes[i] : undefined,
       gender: g === "K" ? "K" : g === "E" ? "E" : undefined,
+      birthDate: s(fd, `p_${i}_birth`) || undefined,
+      nationality: s(fd, `p_${i}_nat`) === "FOREIGN" ? "FOREIGN" : "TC",
+      country: s(fd, `p_${i}_country`) || undefined,
     });
   }
 
@@ -48,6 +51,12 @@ export async function submitCheckout(fd: FormData) {
     quantity: bookingType === "KONTENJAN" ? quantity : undefined,
     boardingPlaceId,
     userId: currentUser?.id,
+    accommodationType:
+      s(fd, "accommodationType") === "SINGLE"
+        ? "SINGLE"
+        : s(fd, "accommodationType") === "MULTI"
+        ? "MULTI"
+        : undefined,
   });
 
   if (!result.ok) {

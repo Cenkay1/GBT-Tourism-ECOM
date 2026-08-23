@@ -20,7 +20,7 @@ export default function BoardingSelector({
   className?: string;
 }) {
   const stops = places
-    .filter((p) => p.type === "DURAK")
+    .filter((p) => p.type === "BINIS")
     .sort((a, b) => a.sortOrder - b.sortOrder);
   if (stops.length === 0) return null;
 

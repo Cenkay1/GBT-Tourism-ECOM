@@ -32,7 +32,7 @@ export default function SeatMap({ tour }: { tour: Tour }) {
   const takenGenders = tour.seatGenders ?? {};
 
   // Biniş durakları (varsa) — seçime göre kişi başı fiyat değişir.
-  const stops = (tour.places ?? []).filter((p) => p.type === "DURAK");
+  const stops = (tour.places ?? []).filter((p) => p.type === "BINIS");
   const [boardingId, setBoardingId] = useState<string | null>(
     stops.length ? stops[0].id : null
   );
@@ -141,28 +141,35 @@ export default function SeatMap({ tour }: { tour: Tour }) {
           </div>
           <div className="flex flex-col gap-2">
             {rows.map((row, r) => (
-              <div key={r} className="flex items-center gap-2">
-                <span className="w-4 text-right text-[10px] text-slate-400">{r + 1}</span>
-                {row.map((seat, c) =>
-                  seat.code === "aisle" ? (
-                    <div key={c} className="w-4" />
-                  ) : (
-                    <button
-                      key={c}
-                      onClick={() => onSeatClick(seat.code, seat.status)}
-                      disabled={seat.status === "SATILDI" || seat.status === "BLOKE"}
-                      title={
-                        seat.status === "BLOKE"
-                          ? `${seat.code} — satışa kapalı`
-                          : seat.status === "SATILDI"
-                          ? `${seat.code} — dolu${seat.gender ? " (" + genderLabel(seat.gender) + ")" : ""}`
-                          : seat.code
-                      }
-                      className={`h-8 w-8 rounded-md text-[10px] font-semibold transition ${seatClasses(seat.code, seat.status, seat.gender)}`}
-                    >
-                      {seat.code}
-                    </button>
-                  )
+              <div key={r}>
+                <div className="flex items-center gap-2">
+                  <span className="w-4 text-right text-[10px] text-slate-400">{r + 1}</span>
+                  {row.map((seat, c) =>
+                    seat.code === "aisle" ? (
+                      <div key={c} className="w-8" />
+                    ) : (
+                      <button
+                        key={c}
+                        onClick={() => onSeatClick(seat.code, seat.status)}
+                        disabled={seat.status === "SATILDI" || seat.status === "BLOKE"}
+                        title={
+                          seat.status === "BLOKE"
+                            ? `${seat.code} — satışa kapalı`
+                            : seat.status === "SATILDI"
+                            ? `${seat.code} — dolu${seat.gender ? " (" + genderLabel(seat.gender) + ")" : ""}`
+                            : seat.code
+                        }
+                        className={`h-8 w-8 rounded-md text-[10px] font-semibold transition ${seatClasses(seat.code, seat.status, seat.gender)}`}
+                      >
+                        {seat.code}
+                      </button>
+                    )
+                  )}
+                </div>
+                {tour.doorAfterRow === r + 1 && (
+                  <div className="my-2 flex items-center gap-2 text-[10px] font-semibold text-slate-400">
+                    <span className="h-px flex-1 bg-slate-200" />🚪 Kapı<span className="h-px flex-1 bg-slate-200" />
+                  </div>
                 )}
               </div>
             ))}

@@ -11,7 +11,7 @@ export default function CapacityBooking({ tour }: { tour: Tour }) {
   const max = Math.min(left, 9);
   const router = useRouter();
 
-  const stops = (tour.places ?? []).filter((p) => p.type === "DURAK");
+  const stops = (tour.places ?? []).filter((p) => p.type === "BINIS");
   const [boardingId, setBoardingId] = useState<string | null>(
     stops.length ? stops[0].id : null
   );
