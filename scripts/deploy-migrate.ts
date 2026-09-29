@@ -5,8 +5,8 @@
 // `prisma migrate deploy` kullanılamıyor. Bu script eksik yapıları TESPİT EDİP
 // ekler ve veriyi taşır; tekrar tekrar çalıştırılabilir (idempotent).
 //
-// Kullanım (proje kökünde):
-//   npx tsx scripts/deploy-migrate.ts
+// Kullanım (proje kökünde) — hedef veritabanı AÇIKÇA verilmelidir:
+//   DATABASE_URL="file:/var/www/gbt/data/prod.db" npx tsx scripts/deploy-migrate.ts
 //
 // Yaptıkları:
 //   1. Bus ve TourDeparture tablolarını oluşturur (yoksa)
@@ -18,9 +18,63 @@
 //
 // Not: placesToVisit kolonu SİLİNMEZ (veri güvenliği). Prisma okumadığı için
 // zararsızdır; istenirse sonradan elle düşürülebilir.
+import { existsSync, statSync } from "node:fs";
 import { prisma } from "../lib/db";
 
 type ColumnInfo = { name: string };
+
+// Yanlış veritabanına yazmaya karşı koruma.
+// lib/db.ts, DATABASE_URL tanımsızsa sessizce "file:./dev.db"e düşer; bu script
+// canlıda çalıştığı için böyle bir düşüş YENİ BOŞ bir dosya oluşturup "başarıyla
+// tamamlandı" demesine yol açardı. O yüzden hedef açıkça verilmeli ve var olmalı.
+async function assertTargetDatabase(): Promise<void> {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error(
+      'HATA: DATABASE_URL verilmedi.\n' +
+        'Hedef veritabanını açıkça belirtin, örn.:\n' +
+        '  DATABASE_URL="file:/var/www/gbt/data/prod.db" npx tsx scripts/deploy-migrate.ts'
+    );
+    process.exit(1);
+  }
+
+  if (url.startsWith("file:")) {
+    const path = url.slice("file:".length);
+    if (!existsSync(path)) {
+      console.error(
+        `HATA: Veritabanı dosyası bulunamadı: ${path}\n` +
+          "Yolu kontrol edin (.env içindeki DATABASE_URL ile aynı olmalı).\n" +
+          "Script yeni bir veritabanı OLUŞTURMAZ — yanlış dosyaya yazmamak için durdu."
+      );
+      process.exit(1);
+    }
+    const size = statSync(path).size;
+    console.log(`Hedef veritabanı: ${path} (${(size / 1024).toFixed(0)} KB)`);
+  } else {
+    console.log(`Hedef veritabanı: ${url}`);
+  }
+
+  // Doğru veritabanı mı? Tur tablosu ve kayıt sayısı teyit için yazdırılır.
+  if (!(await tableExists("Tour"))) {
+    console.error(
+      "HATA: Bu veritabanında Tour tablosu yok — muhtemelen yanlış dosya. Durdu."
+    );
+    process.exit(1);
+  }
+  const [tours, bookings] = await Promise.all([
+    prisma.tour.count(),
+    prisma.booking.count(),
+  ]);
+  console.log(`Mevcut veri: ${tours} tur, ${bookings} rezervasyon\n`);
+  if (tours === 0) {
+    console.error(
+      "HATA: Veritabanında hiç tur yok — boş/yanlış veritabanı olabilir. Durdu.\n" +
+        "Gerçekten boş bir kuruluma uyguluyorsanız bu kontrolü geçmek için " +
+        "önce bir tur ekleyin veya script'i elle düzenleyin."
+    );
+    process.exit(1);
+  }
+}
 
 async function columns(table: string): Promise<Set<string>> {
   const rows = await prisma.$queryRawUnsafe<ColumnInfo[]>(
@@ -47,6 +101,8 @@ async function addColumn(table: string, column: string, ddl: string) {
 }
 
 async function main() {
+  await assertTargetDatabase();
+
   console.log("== 1. Tablolar ==");
 
   if (!(await tableExists("Bus"))) {
