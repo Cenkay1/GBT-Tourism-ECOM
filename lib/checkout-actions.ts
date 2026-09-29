@@ -16,6 +16,7 @@ export async function submitCheckout(fd: FormData) {
   const tourId = s(fd, "tourId");
   const bookingType = s(fd, "bookingType");
   const boardingPlaceId = s(fd, "boardingPlaceId") || undefined;
+  const departureId = s(fd, "departureId") || undefined;
   const seatCodes = s(fd, "seatCodes")
     ? s(fd, "seatCodes").split(",").map((c) => c.trim()).filter(Boolean)
     : [];
@@ -26,6 +27,7 @@ export async function submitCheckout(fd: FormData) {
   const passengers: PassengerInput[] = [];
   for (let i = 0; i < count; i++) {
     const g = s(fd, `p_${i}_gender`);
+    const room = s(fd, `p_${i}_room`);
     passengers.push({
       firstName: s(fd, `p_${i}_first`),
       lastName: s(fd, `p_${i}_last`),
@@ -35,6 +37,9 @@ export async function submitCheckout(fd: FormData) {
       birthDate: s(fd, `p_${i}_birth`) || undefined,
       nationality: s(fd, `p_${i}_nat`) === "FOREIGN" ? "FOREIGN" : "TC",
       country: s(fd, `p_${i}_country`) || undefined,
+      // Yaş grubu gönderilmez: sunucu doğum tarihinden hesaplar.
+      roomIndex: room === "" ? undefined : Number(room),
+      idDocument: s(fd, `p_${i}_doc`) || undefined,
     });
   }
 
@@ -43,6 +48,7 @@ export async function submitCheckout(fd: FormData) {
 
   const result = await createPendingBooking({
     tourId,
+    departureId,
     contactName: s(fd, "contactName"),
     contactPhone: s(fd, "contactPhone"),
     contactEmail: s(fd, "contactEmail"),
@@ -51,12 +57,7 @@ export async function submitCheckout(fd: FormData) {
     quantity: bookingType === "KONTENJAN" ? quantity : undefined,
     boardingPlaceId,
     userId: currentUser?.id,
-    accommodationType:
-      s(fd, "accommodationType") === "SINGLE"
-        ? "SINGLE"
-        : s(fd, "accommodationType") === "MULTI"
-        ? "MULTI"
-        : undefined,
+    rooms: s(fd, "rooms") || undefined,
   });
 
   if (!result.ok) {

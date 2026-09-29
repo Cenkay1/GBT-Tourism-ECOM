@@ -9,10 +9,12 @@ import { toggleSeatBlock } from "@/lib/admin-actions";
 // Satılı/kilitli koltuklara dokunulamaz.
 export default function AdminSeatBlocker({
   tourId,
+  departureId,
   rows,
   doorAfterRow,
 }: {
   tourId: string;
+  departureId: string;
   rows: Seat[][];
   doorAfterRow?: number;
 }) {
@@ -25,7 +27,7 @@ export default function AdminSeatBlocker({
     const block = status === "BOS"; // BOS → kapat, BLOKE → aç
     setBusy(code);
     startTransition(async () => {
-      await toggleSeatBlock(tourId, code, block);
+      await toggleSeatBlock(tourId, departureId, code, block);
       router.refresh();
       setBusy(null);
     });

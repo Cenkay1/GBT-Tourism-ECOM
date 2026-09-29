@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import {
   Tour,
+  TourDeparture,
   Gender,
   buildSeatGrid,
   formatPrice,
   genderLabel,
+  departureSeatsLeft,
 } from "@/lib/shared";
 
 interface PassRow {
@@ -33,7 +35,35 @@ export default function AdminSaleForm({
   action: (fd: FormData) => void;
 }) {
   const isKoltuk = tour.bookingType === "KOLTUK";
-  const grid = useMemo(() => (isKoltuk ? buildSeatGrid(tour) : []), [tour, isKoltuk]);
+
+  // Elden satışta da sefer seçilir: koltuklar/kontenjan sefer bazlıdır.
+  const departures: TourDeparture[] = tour.departures ?? [];
+  const [departureId, setDepartureId] = useState<string>(
+    departures.find((d) => d.status === "AKTIF")?.id ?? departures[0]?.id ?? ""
+  );
+  const departure = departures.find((d) => d.id === departureId);
+
+  const grid = useMemo(
+    () =>
+      isKoltuk
+        ? buildSeatGrid(
+            tour,
+            departure
+              ? {
+                  soldSeats: departure.soldSeats,
+                  blockedSeats: departure.blockedSeats,
+                  seatGenders: departure.seatGenders,
+                  // Araç sefere göre değişebilir: düzen seçili seferden gelir.
+                  vehicleType: departure.vehicleType,
+                  seatRows: departure.seatRows,
+                  doorAfterRow: departure.doorAfterRow,
+                  backRowFull: departure.backRowFull,
+                }
+              : undefined
+          )
+        : [],
+    [tour, isKoltuk, departure]
+  );
 
   // KOLTUK: her seçilen koltuk bir yolcu satırı. KONTENJAN: quantity kadar satır.
   const [rows, setRows] = useState<PassRow[]>(isKoltuk ? [] : [emptyRow()]);
@@ -47,7 +77,9 @@ export default function AdminSaleForm({
 
   const capacityLeft =
     tour.bookingType === "KONTENJAN"
-      ? Math.max(0, (tour.capacity ?? 0) - (tour.sold ?? 0))
+      ? departure
+        ? departureSeatsLeft(tour, departure)
+        : Math.max(0, (tour.capacity ?? 0) - (tour.sold ?? 0))
       : undefined;
 
   function toggleSeat(code: string, status: string) {
@@ -91,10 +123,50 @@ export default function AdminSaleForm({
   return (
     <form action={action} className="space-y-6">
       <input type="hidden" name="tourId" value={tour.id} />
+      <input type="hidden" name="departureId" value={departureId} />
       <input type="hidden" name="passengers" value={JSON.stringify(rows)} />
       <input type="hidden" name="seatCodes" value={JSON.stringify(seatCodes)} />
       <input type="hidden" name="quantity" value={String(count)} />
       <input type="hidden" name="totalAmount" value={String(shownTotal)} />
+
+      {/* Sefer seçimi — koltuk/kontenjan sefere göre değişir */}
+      {departures.length > 1 && (
+        <div className="rounded-2xl bg-white p-6 shadow-sm">
+          <h2 className="mb-1 font-bold text-brand">Sefer</h2>
+          <p className="mb-4 text-xs text-slate-400">
+            Bu turun birden çok kalkış tarihi var. Satışın hangi sefere yazılacağını seçin.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {departures.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => {
+                  setDepartureId(d.id);
+                  setRows(isKoltuk ? [] : [emptyRow()]);
+                  if (!isKoltuk) setQuantity(1);
+                }}
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  d.id === departureId
+                    ? "bg-brand text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {new Date(d.departureDate).toLocaleString("tr-TR", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                {d.bus && ` · ${d.bus.plate}`}
+                {d.status === "KAPALI" && " · kapalı"}
+                {d.isPast && " · arşiv"}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Koltuk / kontenjan seçimi */}
       <div className="rounded-2xl bg-white p-6 shadow-sm">

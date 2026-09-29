@@ -1,16 +1,37 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { formatPrice, formatDate, categoryLabel, Category } from "@/lib/tours";
+import { formatPrice, formatDateTime, categoryLabel, Category } from "@/lib/tours";
 import { deleteTour } from "@/lib/admin-actions";
 import DeleteButton from "@/components/admin/DeleteButton";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminTours() {
-  const tours = await prisma.tour.findMany({
+export default async function AdminTours({
+  searchParams,
+}: {
+  searchParams: Promise<{ gorunum?: string }>;
+}) {
+  const { gorunum } = await searchParams;
+  const archivedView = gorunum === "arsiv";
+  const now = new Date();
+
+  const all = await prisma.tour.findMany({
     orderBy: { createdAt: "desc" },
-    include: { _count: { select: { bookings: true } } },
+    include: {
+      _count: { select: { bookings: true, departures: true } },
+      // Satışa açık gelecek seferler: hiç yoksa tur ARŞİVdedir.
+      departures: {
+        where: { status: "AKTIF", departureDate: { gte: now } },
+        orderBy: { departureDate: "asc" },
+        select: { id: true, departureDate: true, returnDate: true },
+      },
+    },
   });
+
+  // Arşiv = satılabilir seferi kalmayan tur (tarihi geçmiş turlar buraya iner).
+  const active = all.filter((t) => t.departures.length > 0);
+  const archived = all.filter((t) => t.departures.length === 0);
+  const tours = archivedView ? archived : active;
 
   return (
     <div>
@@ -23,6 +44,34 @@ export default async function AdminTours() {
           + Yeni Tur
         </Link>
       </div>
+
+      {/* Aktif / Arşiv — tarihi geçen seferler otomatik arşive düşer */}
+      <div className="mt-4 flex gap-2">
+        <Link
+          href="/admin/turlar"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            !archivedView ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          }`}
+        >
+          Aktif ({active.length})
+        </Link>
+        <Link
+          href="/admin/turlar?gorunum=arsiv"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold transition ${
+            archivedView ? "bg-brand text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          }`}
+        >
+          Arşiv ({archived.length})
+        </Link>
+      </div>
+
+      {archivedView && (
+        <p className="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-sm text-slate-600">
+          Bu turların satışa açık gelecek seferi yok, bu yüzden sitede görünmüyorlar.
+          Aynı turu tekrar yapmak için turu düzenleyip <strong>yeni bir sefer</strong> ekleyin —
+          yeni seferin koltukları boş gelir, eski seferin rezervasyonları kendi seferinde durur.
+        </p>
+      )}
 
       <div className="mt-6 overflow-hidden rounded-2xl bg-white shadow-sm">
         <div className="overflow-x-auto">
@@ -42,7 +91,9 @@ export default async function AdminTours() {
               {tours.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
-                    Henüz tur eklenmemiş. “Yeni Tur” ile başlayın.
+                    {archivedView
+                      ? "Arşivde tur yok."
+                      : "Satışa açık tur yok. “Yeni Tur” ile başlayın veya arşivdeki bir tura yeni sefer ekleyin."}
                   </td>
                 </tr>
               ) : (
@@ -56,7 +107,20 @@ export default async function AdminTours() {
                       {categoryLabel(t.category as Category)}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {formatDate(t.departureDate.toISOString())}
+                      {/* Listede satışa açık en yakın seferin tarih+saati görünür. */}
+                      {formatDateTime(
+                        (t.departures[0]?.departureDate ?? t.departureDate).toISOString()
+                      )}
+                      {t.departures.length > 1 && (
+                        <span className="mt-0.5 block text-xs text-slate-400">
+                          +{t.departures.length - 1} sefer daha
+                        </span>
+                      )}
+                      {archivedView && t._count.departures > 0 && (
+                        <span className="mt-0.5 block text-xs text-slate-400">
+                          {t._count.departures} geçmiş sefer · {t._count.bookings} rezervasyon
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {t.bookingType === "KOLTUK" ? "Koltuk" : "Kontenjan"}

@@ -2,6 +2,7 @@
 import { prisma } from "@/lib/db";
 import { sendSms, sendEmail } from "@/lib/notify";
 import { formatPrice } from "@/lib/shared";
+import { COMPANY as COMPANY_INFO } from "@/lib/company";
 
 const COMPANY = "Gözdem Burak Turizm";
 
@@ -28,9 +29,37 @@ type BookingWithTour = {
     departureLocation: string;
     currency: string;
     bookingType: string;
+    bus: { plate: string; name: string } | null;
   };
+  // Rezervasyonun ait olduğu sefer — tarihler ve araç buradan okunur (tur birden
+  // çok sefer içerebilir; tur üzerindeki tarih yalnız en yakın seferi gösterir).
+  departure: {
+    departureDate: Date;
+    returnDate: Date | null;
+    bus: { plate: string; name: string } | null;
+  } | null;
+  boardingName: string | null;
+  boardingPlace: { name: string; boardingTime: string | null } | null;
   passengers: { seatCode: string | null }[];
 };
+
+// Yolcunun bineceği aracın plakası: seferin otobüsü > turun varsayılan otobüsü.
+function busPlate(b: BookingWithTour): string | null {
+  return b.departure?.bus?.plate ?? b.tour.bus?.plate ?? null;
+}
+
+// Biniş noktası metni: ad + otobüsün orada olacağı güncel saat.
+function boardingText(b: BookingWithTour): string | null {
+  const name = b.boardingPlace?.name ?? b.boardingName;
+  if (!name) return null;
+  const time = b.boardingPlace?.boardingTime;
+  return time ? `${name} · saat ${time}` : name;
+}
+
+// Rezervasyonun gerçek kalkış tarihi: seferi varsa seferin, yoksa turun tarihi.
+function depDate(b: BookingWithTour): Date {
+  return b.departure?.departureDate ?? b.tour.departureDate;
+}
 
 function seatText(b: BookingWithTour): string {
   if (b.tour.bookingType !== "KOLTUK") return `${b.quantity} kişi`;
@@ -46,13 +75,21 @@ function ref(b: BookingWithTour): string {
 export async function sendBookingConfirmation(bookingId: string): Promise<void> {
   const b = (await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: { tour: true, passengers: true },
+    include: {
+      tour: { include: { bus: true } },
+      departure: { include: { bus: true } },
+      boardingPlace: { select: { name: true, boardingTime: true } },
+      passengers: true,
+    },
   })) as BookingWithTour | null;
   if (!b) return;
 
+  const plate = busPlate(b);
   const sms =
     `${COMPANY}\nRezervasyonunuz onaylandı.\n` +
-    `${b.tour.title}\nKalkış: ${fmtDateTime(b.tour.departureDate)}\n` +
+    `${b.tour.title}\nKalkış: ${fmtDateTime(depDate(b))}\n` +
+    `${boardingText(b) ? `Biniş: ${boardingText(b)}\n` : ""}` +
+    `${plate ? `Araç: ${plate} plakalı otobüs\n` : ""}` +
     `${seatText(b)}\nRez. No: ${ref(b)}`;
 
   const email = confirmationEmailHtml(b);
@@ -67,14 +104,24 @@ export async function sendBookingConfirmation(bookingId: string): Promise<void> 
 export async function sendDepartureReminder(bookingId: string): Promise<void> {
   const b = (await prisma.booking.findUnique({
     where: { id: bookingId },
-    include: { tour: true, passengers: true },
+    include: {
+      tour: { include: { bus: true } },
+      departure: { include: { bus: true } },
+      boardingPlace: { select: { name: true, boardingTime: true } },
+      passengers: true,
+    },
   })) as BookingWithTour | null;
   if (!b) return;
 
+  // Kalkıştan bir gün önce giden hatırlatma: plaka yazılır ki müşteri otobüsü
+  // tanısın ("... plakalı otobüs").
+  const plate = busPlate(b);
   const sms =
     `${COMPANY}\nTurunuz yaklaşıyor!\n` +
-    `${b.tour.title}\nKalkış: ${fmtDateTime(b.tour.departureDate)}\n` +
-    `Kalkış yeri: ${b.tour.departureLocation}\n${seatText(b)}\nRez. No: ${ref(b)}\nİyi yolculuklar.`;
+    `${b.tour.title}\nKalkış: ${fmtDateTime(depDate(b))}\n` +
+    `${boardingText(b) ? `Biniş: ${boardingText(b)}\n` : `Kalkış yeri: ${b.tour.departureLocation}\n`}` +
+    `${plate ? `Aracınız: ${plate} plakalı otobüs\n` : ""}` +
+    `${seatText(b)}\nRez. No: ${ref(b)}\nİyi yolculuklar.`;
 
   const email = reminderEmailHtml(b);
 
@@ -89,11 +136,16 @@ export async function runDepartureReminders(): Promise<{ sent: number }> {
   const now = new Date();
   const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
+  // Hatırlatma seferin kalkış tarihine göre seçilir. Seferi olmayan eski
+  // kayıtlar için tur tarihine düşülür.
   const bookings = await prisma.booking.findMany({
     where: {
       status: "ODENDI",
       reminderSentAt: null,
-      tour: { departureDate: { gt: now, lte: in24h } },
+      OR: [
+        { departure: { departureDate: { gt: now, lte: in24h } } },
+        { departureId: null, tour: { departureDate: { gt: now, lte: in24h } } },
+      ],
     },
     select: { id: true },
   });
@@ -108,6 +160,97 @@ export async function runDepartureReminders(): Promise<{ sent: number }> {
     sent++;
   }
   return { sent };
+}
+
+// --- Yaş doğrulama: acenteye onay bildirimi ---
+// Çocuk/bebek yolcu içeren ödeme alındığında acente adresine mail gider;
+// maildeki düğme admin panelindeki rezervasyon sayfasına götürür ve yaş
+// oradan onaylanır.
+export function adminNotifyEmail(): string {
+  return (
+    process.env.ADMIN_NOTIFY_EMAIL?.trim() || COMPANY_INFO.emails[0]
+  );
+}
+
+function siteBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.AUTH_URL?.trim() ||
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
+
+export async function sendAgeVerificationRequest(bookingId: string): Promise<void> {
+  const b = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      tour: { include: { bus: true } },
+      departure: { include: { bus: true } },
+      boardingPlace: { select: { name: true, boardingTime: true } },
+      passengers: true,
+    },
+  });
+  if (!b) return;
+
+  // Yalnız yaş onayı bekleyen (çocuk/bebek, henüz onaylanmamış) yolcular.
+  const pending = b.passengers.filter(
+    (p) => (p.ageBand === "CHILD" || p.ageBand === "INFANT") && !p.ageVerified
+  );
+  if (pending.length === 0) return;
+
+  const ref = b.id.slice(-8).toUpperCase();
+  const adminUrl = `${siteBaseUrl()}/admin/rezervasyonlar/${b.id}`;
+  const depText = fmtDateTime(b.departure?.departureDate ?? b.tour.departureDate);
+
+  const rows = pending
+    .map((p) => {
+      const band = p.ageBand === "CHILD" ? "Çocuk (4-12)" : "Bebek (0-3)";
+      const birth = p.birthDate ? p.birthDate.toLocaleDateString("tr-TR") : "—";
+      const doc = p.idDocument ? "Kimlik belgesi yüklendi" : "Belge YOK — tam ücret alındı";
+      return `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee">${p.firstName} ${p.lastName}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee">${band}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee">${birth}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee">${doc}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const html = shell(
+    "Yaş onayı bekleyen rezervasyon",
+    `<p style="font-size:14px;color:#475569">
+       <strong>${ref}</strong> numaralı rezervasyonda yaş onayı bekleyen ${pending.length} yolcu var.
+       Yüklenen kimlik belgesini admin panelde görüp yaşı onaylayabilirsiniz.
+     </p>
+     <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:12px">
+       <thead>
+         <tr style="text-align:left;color:#64748b">
+           <th style="padding:6px 8px">Yolcu</th>
+           <th style="padding:6px 8px">Yaş Grubu</th>
+           <th style="padding:6px 8px">Doğum T.</th>
+           <th style="padding:6px 8px">Belge</th>
+         </tr>
+       </thead>
+       <tbody>${rows}</tbody>
+     </table>
+     <p style="font-size:13px;color:#64748b;margin-top:12px">
+       Tur: <strong>${b.tour.title}</strong><br>Kalkış: ${depText}<br>
+       İletişim: ${b.contactName} · ${b.contactPhone}
+     </p>
+     <p style="margin-top:20px">
+       <a href="${adminUrl}"
+          style="display:inline-block;background:#22306a;color:#fff;text-decoration:none;
+                 padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px">
+         Admin Panelde İncele ve Onayla
+       </a>
+     </p>
+     <p style="font-size:12px;color:#94a3b8;margin-top:12px">
+       Düğme sizi admin paneline götürür; giriş yaptıktan sonra yolcu satırındaki
+       “Yaşı Onayla” düğmesini kullanın.
+     </p>`
+  );
+
+  await sendEmail(adminNotifyEmail(), `Yaş onayı bekliyor — ${ref}`, html);
 }
 
 // --- E-posta HTML şablonları ---
@@ -127,8 +270,20 @@ function shell(title: string, body: string): string {
 function detailsTable(b: BookingWithTour): string {
   const rows: [string, string][] = [
     ["Tur", b.tour.title],
-    ["Kalkış", fmtDateTime(b.tour.departureDate)],
+    ["Kalkış", fmtDateTime(depDate(b))],
+    ...((b.departure?.returnDate
+      ? [["Dönüş", fmtDateTime(b.departure.returnDate)]]
+      : []) as [string, string][]),
     ["Kalkış Yeri", b.tour.departureLocation],
+    ...((boardingText(b) ? [["Biniş Noktası", boardingText(b)!]] : []) as [
+      string,
+      string
+    ][]),
+    // Aracın plakası: müşteri otobüsü tanısın.
+    ...((busPlate(b) ? [["Araç", `${busPlate(b)} plakalı otobüs`]] : []) as [
+      string,
+      string
+    ][]),
     ["Detay", seatText(b)],
     ["Tutar", formatPrice(b.totalAmount, b.tour.currency)],
     ["Rezervasyon No", ref(b)],

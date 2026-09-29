@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getTourBySlug, formatPrice, formatDate } from "@/lib/tours";
+import { getTourBySlug, formatPrice, formatDateTime, resolveDeparture } from "@/lib/tours";
 import { Gender } from "@/lib/shared";
 import { submitCheckout } from "@/lib/checkout-actions";
 import CheckoutForm from "@/components/CheckoutForm";
@@ -12,12 +12,28 @@ export const dynamic = "force-dynamic";
 export default async function CheckoutPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tur?: string; koltuklar?: string; adet?: string; durak?: string }>;
+  searchParams: Promise<{
+    tur?: string;
+    koltuklar?: string;
+    adet?: string;
+    durak?: string;
+    sefer?: string;
+    odalar?: string;
+  }>;
 }) {
-  const { tur, koltuklar, adet, durak } = await searchParams;
+  const { tur, koltuklar, adet, durak, sefer, odalar } = await searchParams;
   if (!tur) notFound();
   const tour = await getTourBySlug(tur);
   if (!tour) notFound();
+
+  // Satın alınan sefer: koltuk durumu, kalkış tarihi ve kontenjan buradan gelir.
+  const departure = resolveDeparture(tour, sefer);
+  if (!departure) {
+    return <InvalidState slug={tour.slug} message="Bu tur için satışa açık sefer bulunmuyor." />;
+  }
+  if (departure.status !== "AKTIF") {
+    return <InvalidState slug={tour.slug} message="Seçtiğiniz sefer satışa kapatılmış." />;
+  }
 
   // Biniş durağı (varsa) → kişi başı fiyat buradan belirlenir.
   const boardingStop = durak
@@ -44,7 +60,7 @@ export default async function CheckoutPage({
   }
 
   // Seçilen koltuklardan biri bu arada dolduysa uyar
-  const taken = new Set(tour.soldSeats ?? []);
+  const taken = new Set(departure.soldSeats ?? []);
   const conflict = seats.filter((s) => taken.has(s.code));
   if (conflict.length > 0) {
     return (
@@ -67,6 +83,8 @@ export default async function CheckoutPage({
   if (koltuklar) selfParams.set("koltuklar", koltuklar);
   if (adet) selfParams.set("adet", adet);
   if (durak) selfParams.set("durak", durak);
+  if (odalar) selfParams.set("odalar", odalar);
+  selfParams.set("sefer", departure.id);
   const loginHref = `/giris?next=${encodeURIComponent(`/rezervasyon?${selfParams.toString()}`)}`;
 
   return (
@@ -88,11 +106,23 @@ export default async function CheckoutPage({
           quantity={quantity}
           action={submitCheckout}
           boardingPlaceId={boardingStop?.id}
-          boardingLabel={boardingStop?.name}
+          boardingLabel={
+            boardingStop
+              ? boardingStop.boardingTime
+                ? `${boardingStop.name} · ${boardingStop.boardingTime}`
+                : boardingStop.name
+              : undefined
+          }
+          busLabel={departure.bus ? `${departure.bus.plate} plakalı otobüs` : undefined}
+          departureId={departure.id}
           unitPrice={unitPrice}
-          departureDate={tour.departureDate}
+          departureDate={departure.departureDate}
           singleSupplement={tour.singleSupplement ?? 2000}
-          hasAccommodation={(tour.places ?? []).some((p) => p.type === "OTEL")}
+          hasAccommodation={
+            // Admin "Konaklamalı tur" işaretlediyse; eski turlarda otel kaydı da sayılır.
+            Boolean(tour.hasAccommodation) || (tour.places ?? []).some((p) => p.type === "OTEL")
+          }
+          initialRooms={odalar}
           currency={tour.currency}
           defaults={
             user
@@ -109,7 +139,9 @@ export default async function CheckoutPage({
           summary={{
             title: tour.title,
             destination: tour.destination,
-            departureLabel: formatDate(tour.departureDate),
+            departureLabel: departure.returnDate
+              ? `${formatDateTime(departure.departureDate)} → ${formatDateTime(departure.returnDate)}`
+              : formatDateTime(departure.departureDate),
             priceLabel: formatPrice(unitPrice, tour.currency),
             totalLabel: formatPrice(total, tour.currency),
           }}

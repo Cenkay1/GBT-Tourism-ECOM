@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { mapEmbedUrl } from "@/lib/shared";
 import PlaceAutocomplete from "@/components/admin/PlaceAutocomplete";
-import type { PlaceRow } from "@/components/admin/PlacesEditor";
+import type { PlaceRow } from "@/components/admin/placeTypes";
 
-// Biniş noktaları editörü (yalnız BINIS). Her noktaya kişi başı fiyat girilebilir.
+// Biniş noktaları editörü (yalnız BINIS). Her noktaya kişi başı fiyat ve
+// otobüsün o noktada olacağı SAAT girilebilir — ilk kalkıştan sonraki duraklarda
+// biniş saati farklıdır, müşteri kaçta orada olacağını bilmelidir.
 // Müşteri "Nereden bineceksiniz?" adımında bunları görür.
 export default function BoardingPointsEditor({
   value,
@@ -60,6 +62,13 @@ export default function BoardingPointsEditor({
               inputClassName={input}
             />
             <input
+              type="time"
+              value={row.boardingTime ?? ""}
+              onChange={(e) => update(i, { boardingTime: e.target.value })}
+              title="Otobüsün bu noktada olacağı saat — müşteriye gösterilir"
+              className={`${input} w-28`}
+            />
+            <input
               type="number"
               min={0}
               value={row.price ?? ""}
@@ -77,7 +86,11 @@ export default function BoardingPointsEditor({
               {preview === i ? "Gizle" : "Haritada Gör"}
             </button>
           </div>
-          <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400">
+          <p className="mt-1.5 text-[11px] text-slate-400">
+            Saat: otobüsün bu noktada olacağı saat (örn. ilk kalkış 11:00, ikinci durak 11:30).
+            Fiyat boşsa tur fiyatı geçerlidir.
+          </p>
+          <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
             {row.mapQuery ? (
               <span className="font-semibold text-green-600">
                 ✓ Konum seçildi{row.address ? ` — ${row.address}` : ""}

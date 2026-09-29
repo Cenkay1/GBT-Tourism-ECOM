@@ -3,8 +3,9 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@/lib/generated/prisma/client";
 import { getSessionEmail } from "@/lib/auth";
-import { VEHICLES, VehicleType } from "@/lib/shared";
+import { VEHICLES, VehicleType, seatCodes, isValidClockTime } from "@/lib/shared";
 import { createManualPaidBooking } from "@/lib/booking";
 
 async function requireAdmin() {
@@ -50,6 +51,29 @@ function optNum(fd: FormData, k: string): number | null {
 
 // ---- TUR ----
 
+// Tur belgeleri (PDF/Word) — formdan JSON dizi olarak gelir.
+interface DocumentInput {
+  name?: string;
+  url?: string;
+  size?: number;
+}
+
+function parseDocuments(raw: string): { name: string; url: string; size?: number }[] {
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return (parsed as DocumentInput[])
+      .filter((d) => d?.name?.trim() && d?.url?.trim())
+      .map((d) => ({
+        name: d.name!.trim(),
+        url: d.url!.trim(),
+        size: typeof d.size === "number" ? d.size : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 function parseIdList(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw || "[]");
@@ -59,7 +83,14 @@ function parseIdList(raw: string): string[] {
   }
 }
 
-async function tourDataFromForm(fd: FormData) {
+// Form → Tour tablosu alanları.
+// Dönüş tipi Prisma'nın kendi girdi tipine bağlıdır: şemadan kaldırılmış bir
+// kolon burada kalırsa DERLEME ZAMANINDA hata verir. (Aksi halde `{ ...data }`
+// spread'i TypeScript'in fazla-alan kontrolünü atlatır ve hata ancak çalışma
+// anında 500 olarak görünür.) Test edilebilmesi için dışa açıktır.
+export async function tourDataFromForm(
+  fd: FormData
+): Promise<Omit<Prisma.TourUncheckedCreateInput, "slug">> {
   const bookingType = str(fd, "bookingType");
   const images = str(fd, "images")
     .split("\n")
@@ -71,22 +102,43 @@ async function tourDataFromForm(fd: FormData) {
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean);
-  const returnDateRaw = str(fd, "returnDate");
   const coverImage = str(fd, "coverImage") || images[0] || "";
+  const documents = parseDocuments(str(fd, "documents"));
+
+  // Araç: otobüs seçildiyse koltuk düzeni ONDAN gelir (elle girilen alanlar
+  // yok sayılır). Otobüs seçilmediyse eski davranış — alanlar elle girilir.
+  const busId = bookingType === "KOLTUK" ? str(fd, "busId") || null : null;
+  const bus = busId ? await prisma.bus.findUnique({ where: { id: busId } }) : null;
+
   const vehicleType =
-    bookingType === "KOLTUK" ? (str(fd, "vehicleType") || "OTOBUS") : null;
+    bookingType !== "KOLTUK"
+      ? null
+      : bus
+      ? bus.vehicleType
+      : str(fd, "vehicleType") || "OTOBUS";
   const seatLayout =
     vehicleType && VEHICLES[vehicleType as VehicleType]
       ? VEHICLES[vehicleType as VehicleType].layout
       : null;
+  const seatRows = bus ? bus.seatRows : bookingType === "KOLTUK" ? optNum(fd, "seatRows") : null;
+  const doorAfterRow = bus
+    ? bus.doorAfterRow
+    : bookingType === "KOLTUK"
+    ? optNum(fd, "doorAfterRow")
+    : null;
+  const backRowFull = bus
+    ? bus.backRowFull
+    : bookingType === "KOLTUK"
+    ? str(fd, "backRowFull") === "on"
+    : false;
 
   return {
     title: str(fd, "title"),
     destination: str(fd, "destination"),
     category: str(fd, "category"),
     bookingType,
-    departureDate: new Date(str(fd, "departureDate")),
-    returnDate: returnDateRaw ? new Date(returnDateRaw) : null,
+    // Kalkış/dönüş seferlerden türetilir (satışa açık en yakın sefer).
+    ...primaryDates(parseDepartures(str(fd, "departures"))),
     departureLocation: str(fd, "departureLocation"),
     durationDays: num(fd, "durationDays") || 1,
     price: num(fd, "price"),
@@ -95,17 +147,295 @@ async function tourDataFromForm(fd: FormData) {
     images: JSON.stringify(images.length ? images : coverImage ? [coverImage] : []),
     description: str(fd, "description"),
     highlights: JSON.stringify(highlights),
+    documents: JSON.stringify(documents),
     capacity: bookingType === "KONTENJAN" ? optNum(fd, "capacity") : null,
+    busId,
     vehicleType,
     seatLayout,
-    seatRows: bookingType === "KOLTUK" ? optNum(fd, "seatRows") : null,
-    doorAfterRow: bookingType === "KOLTUK" ? optNum(fd, "doorAfterRow") : null,
-    backRowFull: bookingType === "KOLTUK" ? str(fd, "backRowFull") === "on" : false,
+    seatRows,
+    doorAfterRow,
+    backRowFull,
+    hasAccommodation: str(fd, "hasAccommodation") === "on",
     singleSupplement: optNum(fd, "singleSupplement") ?? 2000,
     features: JSON.stringify(features),
     excludedFeatures: JSON.stringify(excludedFeatures),
     status: str(fd, "status") || "YAYINDA",
   };
+}
+
+// ---- SEFERLER (TourDeparture) ----
+
+interface DepartureInput {
+  id?: string;
+  departureDate: string; // yyyy-MM-ddTHH:mm
+  returnDate?: string;
+  capacity?: number;
+  status?: string;
+  busId?: string; // sefere özel otobüs (boşsa turun varsayılanı)
+}
+
+interface ParsedDeparture {
+  id?: string;
+  departureDate: Date;
+  returnDate: Date | null;
+  capacity: number | null;
+  status: string;
+  busId: string | null;
+}
+
+// Form'dan gelen sefer JSON'unu ayrıştır: geçersiz tarihli satırlar atılır,
+// dönüş kalkıştan önce olamaz, sonuç kalkış tarihine göre sıralanır.
+function parseDepartures(raw: string): ParsedDeparture[] {
+  let rows: DepartureInput[] = [];
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (Array.isArray(parsed)) rows = parsed;
+  } catch {
+    rows = [];
+  }
+  const out: ParsedDeparture[] = [];
+  for (const r of rows) {
+    if (!r?.departureDate) continue;
+    const dep = new Date(r.departureDate);
+    if (Number.isNaN(dep.getTime())) continue;
+    let ret = r.returnDate ? new Date(r.returnDate) : null;
+    if (ret && (Number.isNaN(ret.getTime()) || ret < dep)) ret = null;
+    out.push({
+      id: r.id || undefined,
+      departureDate: dep,
+      returnDate: ret,
+      capacity: r.capacity ? Math.max(1, Math.round(Number(r.capacity))) : null,
+      status: r.status === "KAPALI" ? "KAPALI" : "AKTIF",
+      busId: r.busId?.trim() || null,
+    });
+  }
+  out.sort((a, b) => a.departureDate.getTime() - b.departureDate.getTime());
+  return out;
+}
+
+// Turun listelerde/paylaşımda görünen kalkış-dönüşü: satışa açık en yakın sefer.
+function primaryDates(deps: ParsedDeparture[]): {
+  departureDate: Date;
+  returnDate: Date | null;
+} {
+  const primary = deps.find((d) => d.status === "AKTIF") ?? deps[0];
+  if (!primary) return { departureDate: new Date(), returnDate: null };
+  return { departureDate: primary.departureDate, returnDate: primary.returnDate };
+}
+
+interface SeatConfig {
+  bookingType: string;
+  busId: string | null; // turun varsayılan otobüsü
+  vehicleType: string | null; // otobüs yoksa elle girilen düzen
+  seatRows: number | null;
+  backRowFull: boolean;
+}
+
+interface SeatLayout {
+  vehicleType: string;
+  seatRows: number;
+  backRowFull: boolean;
+}
+
+// Bir seferin etkin koltuk düzeni: seferin otobüsü > turun otobüsü > turdaki
+// elle girilmiş alanlar. Koltuklar bu düzene göre üretilir.
+async function resolveSeatLayout(
+  seat: SeatConfig,
+  departureBusId: string | null
+): Promise<SeatLayout | null> {
+  if (seat.bookingType !== "KOLTUK") return null;
+  const busId = departureBusId ?? seat.busId;
+  if (busId) {
+    const bus = await prisma.bus.findUnique({ where: { id: busId } });
+    if (bus) {
+      return {
+        vehicleType: bus.vehicleType,
+        seatRows: bus.seatRows,
+        backRowFull: bus.backRowFull,
+      };
+    }
+  }
+  if (!seat.seatRows) return null;
+  return {
+    vehicleType: seat.vehicleType ?? "OTOBUS",
+    seatRows: seat.seatRows,
+    backRowFull: seat.backRowFull,
+  };
+}
+
+// Bir seferin koltuklarını (gerekiyorsa) yeniden üretir. Satılmış/kilitli/bloke
+// koltuğu olan sefere DOKUNULMAZ — düzen değişikliği mevcut satışı bozmamalı.
+async function syncDepartureSeats(
+  tourId: string,
+  departureId: string,
+  layout: SeatLayout | null
+): Promise<void> {
+  if (!layout) return;
+  const seats = await prisma.seat.findMany({
+    where: { tourId, departureId },
+    select: { code: true, status: true },
+  });
+  const hasActive = seats.some((s) => s.status !== "BOS");
+  if (hasActive) return;
+
+  const wanted = seatCodes(
+    layout.vehicleType as VehicleType,
+    layout.seatRows,
+    layout.backRowFull
+  );
+  const current = seats.map((s) => s.code);
+  const same =
+    current.length === wanted.length && wanted.every((c) => current.includes(c));
+  if (same) return;
+
+  await prisma.seat.deleteMany({ where: { tourId, departureId } });
+  await generateSeats(
+    tourId,
+    departureId,
+    layout.vehicleType,
+    layout.seatRows,
+    layout.backRowFull
+  );
+}
+
+// Otobüsün düzeni değişince onu kullanan (henüz satış olmayan) seferlerin
+// koltuklarını güncelle. Turun varsayılanı olarak kullanıldığı seferler dahil.
+async function regenerateSeatsForBus(busId: string): Promise<void> {
+  const departures = await prisma.tourDeparture.findMany({
+    where: {
+      OR: [{ busId }, { busId: null, tour: { busId } }],
+    },
+    select: { id: true, tourId: true, busId: true, tour: { select: { bookingType: true } } },
+  });
+  for (const d of departures) {
+    if (d.tour.bookingType !== "KOLTUK") continue;
+    const bus = await prisma.bus.findUnique({ where: { id: busId } });
+    if (!bus) continue;
+    await syncDepartureSeats(d.tourId, d.id, {
+      vehicleType: bus.vehicleType,
+      seatRows: bus.seatRows,
+      backRowFull: bus.backRowFull,
+    });
+  }
+}
+
+// Seferleri kaydet. Rezervasyonu olan sefer silinmez; formdan çıkarılmışsa
+// satışa kapatılır. Yeni seferler için koltuklar otomatik üretilir.
+async function saveDepartures(tourId: string, raw: string, seat: SeatConfig) {
+  const submitted = parseDepartures(raw);
+  const existing = await prisma.tourDeparture.findMany({
+    where: { tourId },
+    include: { _count: { select: { bookings: true } } },
+  });
+  const existingById = new Map(existing.map((d) => [d.id, d]));
+  const keptIds = new Set<string>();
+
+  for (let i = 0; i < submitted.length; i++) {
+    const d = submitted[i];
+    const current = d.id ? existingById.get(d.id) : undefined;
+    // Koltuk düzeni seferin otobüsünden (yoksa turun otobüsünden) gelir.
+    const layout = await resolveSeatLayout(seat, d.busId);
+    if (current) {
+      keptIds.add(current.id);
+      await prisma.tourDeparture.update({
+        where: { id: current.id },
+        data: {
+          departureDate: d.departureDate,
+          returnDate: d.returnDate,
+          capacity: seat.bookingType === "KONTENJAN" ? d.capacity : null,
+          status: d.status,
+          sortOrder: i,
+          busId: d.busId,
+        },
+      });
+      // Otobüs/düzen değiştiyse (ve satış yoksa) koltukları güncelle.
+      await syncDepartureSeats(tourId, current.id, layout);
+    } else {
+      const created = await prisma.tourDeparture.create({
+        data: {
+          tourId,
+          departureDate: d.departureDate,
+          returnDate: d.returnDate,
+          capacity: seat.bookingType === "KONTENJAN" ? d.capacity : null,
+          status: d.status,
+          sortOrder: i,
+          busId: d.busId,
+        },
+      });
+      keptIds.add(created.id);
+      if (layout) {
+        await generateSeats(
+          tourId,
+          created.id,
+          layout.vehicleType,
+          layout.seatRows,
+          layout.backRowFull
+        );
+      }
+    }
+  }
+
+  // Formdan çıkarılan seferler: rezervasyonu varsa sil(me) — satışa kapat.
+  for (const d of existing) {
+    if (keptIds.has(d.id)) continue;
+    if (d._count.bookings > 0) {
+      await prisma.tourDeparture.update({
+        where: { id: d.id },
+        data: { status: "KAPALI" },
+      });
+    } else {
+      await prisma.tourDeparture.delete({ where: { id: d.id } });
+    }
+  }
+
+  // Hiç sefer kalmadıysa turun kendi tarihinden bir sefer aç (veri tutarlılığı).
+  const remaining = await prisma.tourDeparture.count({ where: { tourId } });
+  if (remaining === 0) {
+    const tour = await prisma.tour.findUnique({ where: { id: tourId } });
+    if (tour) {
+      const created = await prisma.tourDeparture.create({
+        data: {
+          tourId,
+          departureDate: tour.departureDate,
+          returnDate: tour.returnDate,
+          capacity: tour.bookingType === "KONTENJAN" ? tour.capacity : null,
+        },
+      });
+      const layout = await resolveSeatLayout(seat, null);
+      if (layout) {
+        await generateSeats(
+          tourId,
+          created.id,
+          layout.vehicleType,
+          layout.seatRows,
+          layout.backRowFull
+        );
+      }
+    }
+  }
+
+  await syncTourDates(tourId);
+}
+
+// Tour.departureDate/returnDate'i satışa açık en yakın seferden güncelle.
+async function syncTourDates(tourId: string) {
+  // Turun listelerde görünen tarihi: satışa açık EN YAKIN GELECEK sefer.
+  // Böyle bir sefer yoksa (tur arşivdeyse) en son sefer.
+  const upcoming = await prisma.tourDeparture.findFirst({
+    where: { tourId, status: "AKTIF", departureDate: { gte: new Date() } },
+    orderBy: { departureDate: "asc" },
+  });
+  const primary =
+    upcoming ??
+    (await prisma.tourDeparture.findFirst({
+      where: { tourId },
+      orderBy: { departureDate: "desc" },
+    }));
+  if (!primary) return;
+  await prisma.tour.update({
+    where: { id: tourId },
+    data: { departureDate: primary.departureDate, returnDate: primary.returnDate },
+  });
 }
 
 interface PlaceInput {
@@ -115,6 +445,8 @@ interface PlaceInput {
   mapQuery?: string;
   nights?: number;
   price?: number;
+  boardingTime?: string; // BINIS için "HH:MM"
+  showOnMap?: boolean; // GEZI için
 }
 
 // Form'dan gelen JSON durak/otel listesini kaydet (önce mevcutları sil).
@@ -130,32 +462,63 @@ async function savePlaces(tourId: string, raw: string) {
   const valid = places.filter((p) => p.name?.trim());
   if (valid.length === 0) return;
   await prisma.tourPlace.createMany({
-    data: valid.map((p, i) => ({
-      tourId,
-      type: p.type === "OTEL" ? "OTEL" : p.type === "BINIS" ? "BINIS" : "DURAK",
-      name: p.name.trim(),
-      address: p.address?.trim() || null,
-      mapQuery: (p.mapQuery?.trim() || p.address?.trim() || p.name.trim()) || null,
-      nights: p.type === "OTEL" && p.nights ? Number(p.nights) : null,
-      price: p.type === "BINIS" && p.price ? Math.round(Number(p.price)) : null,
-      sortOrder: i,
-    })),
+    data: valid.map((p, i) => {
+      const type = p.type === "OTEL" ? "OTEL" : p.type === "BINIS" ? "BINIS" : "GEZI";
+      const time = p.boardingTime?.trim();
+      return {
+        tourId,
+        type,
+        name: p.name.trim(),
+        address: p.address?.trim() || null,
+        mapQuery: (p.mapQuery?.trim() || p.address?.trim() || p.name.trim()) || null,
+        nights: type === "OTEL" && p.nights ? Number(p.nights) : null,
+        price: type === "BINIS" && p.price ? Math.round(Number(p.price)) : null,
+        // Biniş saati yalnız biniş noktalarında ve "HH:MM" biçiminde tutulur.
+        boardingTime: type === "BINIS" && time && isValidClockTime(time) ? time : null,
+        // Gezilecek yer haritada gösterilsin mi (diğer tiplerde her zaman evet).
+        showOnMap: type === "GEZI" ? p.showOnMap !== false : true,
+        sortOrder: i,
+      };
+    }),
   });
 }
 
-async function generateSeats(tourId: string, vehicleType: string, rows: number, backRowFull: boolean) {
+// Bir seferin koltuklarını üret (koltuklar sefere bağlıdır).
+async function generateSeats(
+  tourId: string,
+  departureId: string,
+  vehicleType: string,
+  rows: number,
+  backRowFull: boolean
+) {
   const v = VEHICLES[vehicleType as VehicleType] ?? VEHICLES.OTOBUS;
   const cols = [...v.left, ...v.right];
   const data = [];
   for (let r = 1; r <= rows; r++) {
     for (const c of cols) {
-      data.push({ tourId, code: `${r}${c}`, status: "BOS" });
+      data.push({ tourId, departureId, code: `${r}${c}`, status: "BOS" });
     }
     if (backRowFull && r === rows) {
-      data.push({ tourId, code: `${r}M`, status: "BOS" });
+      data.push({ tourId, departureId, code: `${r}M`, status: "BOS" });
     }
   }
   if (data.length) await prisma.seat.createMany({ data });
+}
+
+function seatConfigOf(data: {
+  bookingType: string;
+  busId?: string | null;
+  vehicleType?: string | null;
+  seatRows?: number | null;
+  backRowFull?: boolean;
+}): SeatConfig {
+  return {
+    bookingType: data.bookingType,
+    busId: data.busId ?? null,
+    vehicleType: data.vehicleType ?? null,
+    seatRows: data.seatRows ?? null,
+    backRowFull: data.backRowFull ?? false,
+  };
 }
 
 export async function createTour(fd: FormData) {
@@ -164,9 +527,8 @@ export async function createTour(fd: FormData) {
   const slug = await uniqueSlug(data.title);
   const tour = await prisma.tour.create({ data: { ...data, slug } });
 
-  if (data.bookingType === "KOLTUK" && data.seatRows) {
-    await generateSeats(tour.id, data.vehicleType ?? "OTOBUS", data.seatRows, data.backRowFull);
-  }
+  // Koltuklar sefer bazlı üretilir; saveDepartures her yeni sefer için üretir.
+  await saveDepartures(tour.id, str(fd, "departures"), seatConfigOf(data));
   await savePlaces(tour.id, str(fd, "places"));
   revalidatePath("/");
   revalidatePath("/admin/turlar");
@@ -184,8 +546,10 @@ export async function updateTour(id: string, fd: FormData) {
   });
 
   await prisma.tour.update({ where: { id }, data: { ...data, slug } });
+  await saveDepartures(id, str(fd, "departures"), seatConfigOf(data));
 
-  // Araç tipi/sıra değiştiyse ve satılmış-kilitli koltuk yoksa yeniden üret
+  // Araç tipi/sıra değiştiyse ve hiçbir seferde satılmış/kilitli koltuk yoksa
+  // tüm seferlerin koltuklarını yeniden üret.
   if (data.bookingType === "KOLTUK" && data.seatRows) {
     const hasActive = existing?.seats.some((s) => s.status !== "BOS");
     const layoutChanged =
@@ -194,7 +558,16 @@ export async function updateTour(id: string, fd: FormData) {
       existing?.backRowFull !== data.backRowFull;
     if (!hasActive && layoutChanged) {
       await prisma.seat.deleteMany({ where: { tourId: id } });
-      await generateSeats(id, data.vehicleType ?? "OTOBUS", data.seatRows, data.backRowFull);
+      const departures = await prisma.tourDeparture.findMany({ where: { tourId: id } });
+      for (const d of departures) {
+        await generateSeats(
+          id,
+          d.id,
+          data.vehicleType ?? "OTOBUS",
+          data.seatRows,
+          data.backRowFull ?? false
+        );
+      }
     }
   }
   await savePlaces(id, str(fd, "places"));
@@ -213,14 +586,98 @@ export async function deleteTour(id: string) {
 // ---- KOLTUK YÖNETİMİ (BLOKE) ----
 // Acente görevlisi ön/istenen koltukları online satışa kapatır (BLOKE) veya açar (BOS).
 // Satılı/kilitli koltuklara dokunulmaz.
-export async function toggleSeatBlock(tourId: string, code: string, block: boolean) {
+export async function toggleSeatBlock(
+  tourId: string,
+  departureId: string,
+  code: string,
+  block: boolean
+) {
   await requireAdmin();
   await prisma.seat.updateMany({
-    where: { tourId, code, status: block ? "BOS" : "BLOKE" },
+    where: { tourId, departureId, code, status: block ? "BOS" : "BLOKE" },
     data: { status: block ? "BLOKE" : "BOS" },
   });
   revalidatePath(`/admin/turlar/${tourId}/koltuklar`);
   revalidatePath("/");
+}
+
+// ---- OTOBÜSLER (FİLO) ----
+// Araç tanımı koltuk düzenini ve plakayı taşır. Turlar/seferler buradan araç
+// seçer; koltuk şeması araca göre birebir oluşur ve hatırlatma mesajlarında
+// plaka yazılır.
+
+function busDataFromForm(fd: FormData) {
+  const vehicleType = str(fd, "vehicleType") || "OTOBUS";
+  const layout =
+    VEHICLES[vehicleType as VehicleType]?.layout ?? VEHICLES.OTOBUS.layout;
+  return {
+    name: str(fd, "name"),
+    plate: str(fd, "plate").toLocaleUpperCase("tr"),
+    vehicleType,
+    seatLayout: layout,
+    seatRows: Math.max(1, num(fd, "seatRows") || 12),
+    doorAfterRow: optNum(fd, "doorAfterRow"),
+    backRowFull: str(fd, "backRowFull") === "on",
+    notes: str(fd, "notes"),
+    active: fd.get("active") === "on",
+  };
+}
+
+export async function createBus(fd: FormData) {
+  await requireAdmin();
+  const data = busDataFromForm(fd);
+  if (!data.name || !data.plate) {
+    redirect(
+      `/admin/otobusler?hata=${encodeURIComponent("Otobüs adı ve plaka zorunludur.")}`
+    );
+  }
+  await prisma.bus.create({ data });
+  revalidatePath("/admin/otobusler");
+  revalidatePath("/admin/turlar");
+  redirect("/admin/otobusler");
+}
+
+export async function updateBus(id: string, fd: FormData) {
+  await requireAdmin();
+  const data = busDataFromForm(fd);
+  if (!data.name || !data.plate) {
+    redirect(
+      `/admin/otobusler/${id}?hata=${encodeURIComponent("Otobüs adı ve plaka zorunludur.")}`
+    );
+  }
+  await prisma.bus.update({ where: { id }, data });
+
+  // Düzen değiştiyse bu otobüsü kullanan ve HENÜZ SATIŞ OLMAYAN seferlerin
+  // koltuklarını yeniden üret; satış başlamış seferlere dokunulmaz.
+  await regenerateSeatsForBus(id);
+
+  revalidatePath("/admin/otobusler");
+  revalidatePath("/admin/turlar");
+  redirect("/admin/otobusler");
+}
+
+export async function deleteBus(id: string) {
+  await requireAdmin();
+  // Kullanımdaki otobüs silinmez (turların/seferlerin düzeni bozulmasın).
+  const [tourCount, departureCount] = await Promise.all([
+    prisma.tour.count({ where: { busId: id } }),
+    prisma.tourDeparture.count({ where: { busId: id } }),
+  ]);
+  if (tourCount + departureCount > 0) {
+    redirect(
+      `/admin/otobusler?hata=${encodeURIComponent(
+        `Bu otobüs ${tourCount + departureCount} tur/seferde kullanılıyor. Silmek yerine "Pasif" yapın.`
+      )}`
+    );
+  }
+  await prisma.bus.delete({ where: { id } });
+  revalidatePath("/admin/otobusler");
+}
+
+export async function toggleBus(id: string, active: boolean) {
+  await requireAdmin();
+  await prisma.bus.update({ where: { id }, data: { active } });
+  revalidatePath("/admin/otobusler");
 }
 
 // ---- AFİŞ ----
@@ -378,6 +835,7 @@ export async function createManualBooking(fd: FormData) {
 
   const result = await createManualPaidBooking({
     tourId,
+    departureId: str(fd, "departureId") || undefined,
     contactName: str(fd, "contactName"),
     contactPhone: str(fd, "contactPhone"),
     contactEmail: str(fd, "contactEmail"),
@@ -396,6 +854,51 @@ export async function createManualBooking(fd: FormData) {
   revalidatePath("/admin/rezervasyonlar");
   revalidatePath("/");
   redirect("/admin/rezervasyonlar");
+}
+
+// ---- YAŞ DOĞRULAMA (çocuk / bebek) ----
+// Görevli, müşterinin yüklediği kimlik belgesini panelde görüp yaşı onaylar.
+// Onay yalnız bir kayıt/işaret: fiyat rezervasyon anında belgeye göre
+// hesaplandığı için burada tutar değişmez.
+export async function setPassengerAgeVerified(
+  passengerId: string,
+  verified: boolean
+) {
+  await requireAdmin();
+  const passenger = await prisma.passenger.update({
+    where: { id: passengerId },
+    data: { ageVerified: verified },
+    select: { bookingId: true },
+  });
+  revalidatePath(`/admin/rezervasyonlar/${passenger.bookingId}`);
+  revalidatePath("/admin/rezervasyonlar");
+}
+
+// Kimlik belgesini kalıcı olarak sil (KVKK: iş bittiğinde belgeyi tutmayın).
+// Onay kaydı (ageVerified) korunur; yalnız dosya ve referansı kaldırılır.
+export async function deletePassengerDocument(passengerId: string) {
+  await requireAdmin();
+  const passenger = await prisma.passenger.findUnique({
+    where: { id: passengerId },
+    select: { bookingId: true, idDocument: true },
+  });
+  if (!passenger) return;
+
+  if (passenger.idDocument) {
+    const { idDocumentPath } = await import("@/lib/id-documents");
+    const filePath = idDocumentPath(passenger.idDocument);
+    if (filePath) {
+      const { unlink } = await import("node:fs/promises");
+      await unlink(filePath).catch(() => {
+        // Dosya zaten yoksa sorun değil; referansı temizlemeye devam et.
+      });
+    }
+  }
+  await prisma.passenger.update({
+    where: { id: passengerId },
+    data: { idDocument: null },
+  });
+  revalidatePath(`/admin/rezervasyonlar/${passenger.bookingId}`);
 }
 
 export async function setBookingStatus(id: string, status: string) {

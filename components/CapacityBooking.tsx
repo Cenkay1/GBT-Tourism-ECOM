@@ -2,11 +2,24 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Tour, formatPrice } from "@/lib/shared";
+import { Tour, TourDeparture, formatPrice, departureSeatsLeft } from "@/lib/shared";
 import BoardingSelector from "@/components/BoardingSelector";
 
-export default function CapacityBooking({ tour }: { tour: Tour }) {
-  const left = (tour.capacity ?? 0) - (tour.sold ?? 0);
+export default function CapacityBooking({
+  tour,
+  departure,
+}: {
+  tour: Tour;
+  departure?: TourDeparture;
+}) {
+  // Kontenjan sefer bazlıdır; sefer verilmezse tur seviyesi sayıma düşülür.
+  const left = departure
+    ? departureSeatsLeft(tour, departure)
+    : (tour.capacity ?? 0) - (tour.sold ?? 0);
+  // Burada yalnız KİŞİ SAYISI seçilir. Konaklamalı turda oda dağılımı ve yaş
+  // grupları bir sonraki adımda (yolcu formunda) doğum tarihinden belirlenir —
+  // müşteri aynı bilgiyi iki kez girmez.
+  const accommodation = Boolean(tour.hasAccommodation);
   const [qty, setQty] = useState(1);
   const max = Math.min(left, 9);
   const router = useRouter();
@@ -17,10 +30,16 @@ export default function CapacityBooking({ tour }: { tour: Tour }) {
   );
   const boardingStop = stops.find((s) => s.id === boardingId);
   const unitPrice = boardingStop?.price ?? tour.price;
+
+  // Bu ekranda gösterilen tutar tam ücret üzerinden; yaş indirimleri ve tek
+  // kişilik oda farkı yolcu bilgileri girildikten sonra kesinleşir.
   const total = qty * unitPrice;
+  const overCapacity = qty > left;
+  const blocked = left <= 0 || qty < 1 || overCapacity;
 
   function goToCheckout() {
     const params = new URLSearchParams({ tur: tour.slug, adet: String(qty) });
+    if (departure) params.set("sefer", departure.id);
     if (boardingId) params.set("durak", boardingId);
     router.push(`/rezervasyon?${params}`);
   }
@@ -80,9 +99,23 @@ export default function CapacityBooking({ tour }: { tour: Tour }) {
         </div>
       </div>
 
+      {accommodation && (
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          Konaklamalı tur: oda dağılımını bir sonraki adımda yaparsınız. Çocuk (4-12)
+          indirimi ve bebek (0-3) ücretsizliği, yolcu doğum tarihlerine göre orada
+          otomatik uygulanır.
+        </p>
+      )}
+
+      {overCapacity && (
+        <p className="mt-3 text-xs font-medium text-red-600">
+          Kalan kontenjan {left} kişi; seçtiğiniz kişi sayısı bunu aşıyor.
+        </p>
+      )}
+
       <button
         onClick={goToCheckout}
-        disabled={left <= 0}
+        disabled={blocked}
         className="mt-5 w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition enabled:hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
       >
         {left <= 0 ? "Kontenjan Doldu" : "Devam Et"}

@@ -15,6 +15,7 @@ import {
 const items = [
   { href: "/admin", label: "Panel", Icon: DashboardIcon, exact: true },
   { href: "/admin/turlar", label: "Turlar", Icon: BusIcon },
+  { href: "/admin/otobusler", label: "Otobüslerim", Icon: BusIcon },
   { href: "/admin/ozellikler", label: "Özellikler", Icon: CheckIcon },
   { href: "/admin/afisler", label: "Afişler", Icon: ImageIcon },
   { href: "/admin/rezervasyonlar", label: "Rezervasyonlar", Icon: TicketIcon },

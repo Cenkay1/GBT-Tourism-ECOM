@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Tour, formatPrice, formatDate, categoryLabel } from "@/lib/shared";
+import { Tour, formatPrice, formatDateTime, categoryLabel } from "@/lib/shared";
 import { CalendarIcon, ClockIcon, MapPinIcon } from "@/components/Icons";
 
 export default function TourCard({ tour }: { tour: Tour }) {
@@ -33,7 +33,7 @@ export default function TourCard({ tour }: { tour: Tour }) {
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
           <span className="flex items-center gap-1.5">
             <CalendarIcon width={14} height={14} className="text-slate-400" />
-            {formatDate(tour.departureDate)}
+            {formatDateTime(tour.departureDate)}
           </span>
           <span className="flex items-center gap-1.5">
             <ClockIcon width={14} height={14} className="text-slate-400" />

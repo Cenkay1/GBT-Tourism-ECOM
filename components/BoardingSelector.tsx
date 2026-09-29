@@ -28,7 +28,8 @@ export default function BoardingSelector({
     <div className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5 ${className}`}>
       <h3 className="font-bold text-brand">Nereden bineceksiniz?</h3>
       <p className="mt-0.5 text-xs text-slate-400">
-        Biniş noktanızı seçin — fiyat biniş noktasına göre değişebilir.
+        Biniş noktanızı seçin — fiyat biniş noktasına göre değişebilir. Saat, otobüsün
+        o noktada olacağı zamandır.
       </p>
       <div className="mt-3 flex flex-col gap-2">
         {stops.map((s) => {
@@ -53,7 +54,14 @@ export default function BoardingSelector({
                 >
                   {active && <span className="h-2.5 w-2.5 rounded-full bg-accent" />}
                 </span>
-                <span className="text-sm font-semibold text-slate-700">{s.name}</span>
+                <span>
+                  <span className="block text-sm font-semibold text-slate-700">{s.name}</span>
+                  {s.boardingTime && (
+                    <span className="block text-xs text-slate-500">
+                      Otobüs burada: <strong>{s.boardingTime}</strong>
+                    </span>
+                  )}
+                </span>
               </span>
               <span className="shrink-0 text-sm font-bold text-accent">
                 {formatPrice(price, currency)}

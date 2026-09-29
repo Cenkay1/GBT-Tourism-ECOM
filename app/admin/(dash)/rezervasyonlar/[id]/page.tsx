@@ -2,7 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
-import { setBookingStatus, deleteBooking } from "@/lib/admin-actions";
+import { bandLabel as bandLabelOf, decodeRooms, type AgeBand } from "@/lib/shared";
+import {
+  setBookingStatus,
+  deleteBooking,
+  setPassengerAgeVerified,
+  deletePassengerDocument,
+} from "@/lib/admin-actions";
+import { idDocumentViewUrl } from "@/lib/id-documents";
 import DeleteButton from "@/components/admin/DeleteButton";
 import {
   UsersIcon,
@@ -12,6 +19,21 @@ import {
 } from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
+
+function bandLabel(band: string): string {
+  return bandLabelOf(band as AgeBand);
+}
+
+// "3|2" → "2 oda — 3 kişi / 2 kişi" gibi okunur bir özet. Yolcuların yaş
+// grupları ayrı kolonda görünür (doğum tarihinden hesaplanır).
+function roomsSummary(raw: string): string {
+  const rooms = decodeRooms(raw);
+  if (rooms.length === 0) return "—";
+  const single = rooms.filter((n) => n === 1).length;
+  return `${rooms.length} oda — ${rooms.map((n) => `${n} kişi`).join(" / ")}${
+    single > 0 ? ` (${single} tek kişilik)` : ""
+  }`;
+}
 
 const statusLabel: Record<string, string> = {
   ODENDI: "Ödendi",
@@ -28,9 +50,19 @@ export default async function BookingDetail({
   const { id } = await params;
   const b = await prisma.booking.findUnique({
     where: { id },
-    include: { tour: true, passengers: true },
+    include: {
+      tour: { include: { bus: true } },
+      departure: { include: { bus: true } },
+      boardingPlace: true,
+      passengers: true,
+    },
   });
   if (!b) notFound();
+
+  // Yaş onayı bekleyen çocuk/bebek yolcular.
+  const pendingAge = b.passengers.filter(
+    (p) => p.ageBand && p.ageBand !== "ADULT" && !p.ageVerified
+  );
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -81,9 +113,16 @@ export default async function BookingDetail({
 
           {/* Yolcular */}
           <section className="rounded-2xl bg-white p-6 shadow-sm">
-            <h2 className="mb-4 font-bold text-brand">
+            <h2 className="mb-1 font-bold text-brand">
               Yolcular ({b.passengers.length})
             </h2>
+            {pendingAge.length > 0 && (
+              <p className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                ⚠ {pendingAge.length} yolcunun yaşı onay bekliyor. Kimlik belgesini görüp
+                aşağıdan onaylayın.
+              </p>
+            )}
+            {pendingAge.length === 0 && <div className="mb-4" />}
             {b.passengers.length === 0 ? (
               <p className="text-sm text-slate-400">Yolcu bilgisi girilmemiş.</p>
             ) : (
@@ -95,6 +134,8 @@ export default async function BookingDetail({
                       <th className="pb-2">Ad</th>
                       <th className="pb-2">Soyad</th>
                       <th className="pb-2">TC / Pasaport</th>
+                      <th className="pb-2">Yaş Grubu</th>
+                      <th className="pb-2">Oda</th>
                       <th className="pb-2">Koltuk</th>
                     </tr>
                   </thead>
@@ -105,6 +146,30 @@ export default async function BookingDetail({
                         <td className="py-2.5 font-medium text-slate-800">{p.firstName}</td>
                         <td className="py-2.5 font-medium text-slate-800">{p.lastName}</td>
                         <td className="py-2.5 text-slate-600">{p.idNumber ?? "—"}</td>
+                        <td className="py-2.5 text-slate-600">
+                          {p.ageBand ? (
+                            <span className="flex flex-col gap-1">
+                              <span>{bandLabel(p.ageBand)}</span>
+                              {p.birthDate && (
+                                <span className="text-xs text-slate-400">
+                                  {p.birthDate.toLocaleDateString("tr-TR")}
+                                </span>
+                              )}
+                              {p.ageBand !== "ADULT" && (
+                                <AgeVerification
+                                  id={p.id}
+                                  verified={p.ageVerified}
+                                  hasDocument={Boolean(p.idDocument)}
+                                />
+                              )}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 text-slate-600">
+                          {p.roomIndex != null ? `${p.roomIndex + 1}. Oda` : "—"}
+                        </td>
                         <td className="py-2.5 text-slate-600">{p.seatCode ?? "—"}</td>
                       </tr>
                     ))}
@@ -122,8 +187,31 @@ export default async function BookingDetail({
             <p className="font-medium text-slate-800">{b.tour.title}</p>
             <p className="text-sm text-slate-400">{b.tour.destination}</p>
             <p className="mt-1 text-sm text-slate-500">
-              Kalkış: {formatDate(b.tour.departureDate.toISOString())}
+              Kalkış:{" "}
+              {formatDate(
+                (b.departure?.departureDate ?? b.tour.departureDate).toISOString()
+              )}
+              {b.departure?.returnDate &&
+                ` → ${formatDate(b.departure.returnDate.toISOString())}`}
             </p>
+            {(b.departure?.bus ?? b.tour.bus) && (
+              <p className="mt-1 text-sm text-slate-500">
+                Araç: {(b.departure?.bus ?? b.tour.bus)!.plate}
+                {" · "}
+                {(b.departure?.bus ?? b.tour.bus)!.name}
+              </p>
+            )}
+            {(b.boardingPlace?.name ?? b.boardingName) && (
+              <p className="mt-1 text-sm text-slate-500">
+                Biniş: {b.boardingPlace?.name ?? b.boardingName}
+                {b.boardingPlace?.boardingTime && ` · ${b.boardingPlace.boardingTime}`}
+              </p>
+            )}
+            {b.rooms && (
+              <p className="mt-1 text-sm text-slate-500">
+                Konaklama: {roomsSummary(b.rooms)}
+              </p>
+            )}
             <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
               <span className="text-sm text-slate-500">Toplam</span>
               <span className="text-lg font-extrabold text-accent">
@@ -174,6 +262,75 @@ function Field({
       </dt>
       <dd className="mt-1 font-medium text-slate-800">{value}</dd>
     </div>
+  );
+}
+
+// Yolcu satırındaki yaş onay kutusu: belgeyi görüntüle, onayla/geri al, belgeyi sil.
+function AgeVerification({
+  id,
+  verified,
+  hasDocument,
+}: {
+  id: string;
+  verified: boolean;
+  hasDocument: boolean;
+}) {
+  return (
+    <span className="mt-0.5 flex flex-col items-start gap-1">
+      {verified ? (
+        <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+          ✓ Yaş onaylı
+        </span>
+      ) : (
+        <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+          Onay bekliyor
+        </span>
+      )}
+
+      {hasDocument ? (
+        <a
+          href={idDocumentViewUrl(id)}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs font-semibold text-brand underline hover:text-accent"
+        >
+          Kimlik belgesini gör
+        </a>
+      ) : (
+        <span className="text-xs text-slate-400">Belge yok — tam ücret alındı</span>
+      )}
+
+      <span className="flex flex-wrap gap-1.5">
+        <form
+          action={async () => {
+            "use server";
+            await setPassengerAgeVerified(id, !verified);
+          }}
+        >
+          <button
+            className={`rounded-md px-2 py-1 text-xs font-semibold transition ${
+              verified
+                ? "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                : "bg-emerald-600 text-white hover:bg-emerald-700"
+            }`}
+          >
+            {verified ? "Onayı geri al" : "Yaşı Onayla"}
+          </button>
+        </form>
+        {hasDocument && (
+          <form
+            action={async () => {
+              "use server";
+              await deletePassengerDocument(id);
+            }}
+          >
+            <button className="rounded-md px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50">
+              Belgeyi sil
+            </button>
+          </form>
+        )}
+      </span>
+    </span>
   );
 }
 

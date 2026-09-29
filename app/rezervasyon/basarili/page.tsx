@@ -15,7 +15,7 @@ export default async function SuccessPage({
   if (!no) notFound();
   const booking = await prisma.booking.findUnique({
     where: { id: no },
-    include: { tour: true, passengers: true },
+    include: { tour: true, departure: true, passengers: true },
   });
   if (!booking) notFound();
 
@@ -39,7 +39,16 @@ export default async function SuccessPage({
         <div className="mt-6 rounded-xl bg-slate-50 p-5 text-left text-sm">
           <Row label="Rezervasyon No" value={booking.id.slice(-8).toUpperCase()} />
           <Row label="Tur" value={booking.tour.title} />
-          <Row label="Kalkış" value={formatDate(booking.tour.departureDate.toISOString())} />
+          {/* Tarih rezervasyonun seferinden okunur (tur birden çok sefer içerebilir). */}
+          <Row
+            label="Kalkış"
+            value={formatDate(
+              (booking.departure?.departureDate ?? booking.tour.departureDate).toISOString()
+            )}
+          />
+          {booking.departure?.returnDate && (
+            <Row label="Dönüş" value={formatDate(booking.departure.returnDate.toISOString())} />
+          )}
           {booking.tour.bookingType === "KOLTUK" ? (
             <Row label="Koltuklar" value={seats || "—"} />
           ) : (

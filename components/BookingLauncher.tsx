@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Tour } from "@/lib/shared";
+import { Tour, TourDeparture } from "@/lib/shared";
 import SeatMap from "@/components/SeatMap";
 import CapacityBooking from "@/components/CapacityBooking";
+import DepartureSelector from "@/components/DepartureSelector";
 
 export default function BookingLauncher({
   tour,
@@ -19,6 +20,15 @@ export default function BookingLauncher({
   const [mounted, setMounted] = useState(false);
   const isSeat = tour.bookingType === "KOLTUK";
   const btnLabel = label ?? (isSeat ? "Koltuk Seç" : "Rezervasyon Yap");
+
+  // Yalnız satışa açık seferler müşteriye gösterilir.
+  const departures: TourDeparture[] = (tour.departures ?? []).filter(
+    (d) => d.status === "AKTIF"
+  );
+  const [departureId, setDepartureId] = useState<string | null>(
+    departures[0]?.id ?? null
+  );
+  const departure = departures.find((d) => d.id === departureId) ?? departures[0];
 
   // Portal yalnızca istemcide (mount sonrası) kullanılabilir.
   useEffect(() => setMounted(true), []);
@@ -65,8 +75,23 @@ export default function BookingLauncher({
             </div>
 
             {/* İçerik */}
-            <div className="p-5">
-              {isSeat ? <SeatMap tour={tour} /> : <CapacityBooking tour={tour} />}
+            <div className="space-y-5 p-5">
+              <DepartureSelector
+                tour={tour}
+                departures={departures}
+                value={departure?.id ?? null}
+                onChange={setDepartureId}
+              />
+              {!departure ? (
+                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  Bu tur için şu anda satışa açık sefer bulunmuyor.
+                </p>
+              ) : isSeat ? (
+                // Sefer değişince koltuk seçimi sıfırlanmalı: key ile yeniden kur.
+                <SeatMap key={departure.id} tour={tour} departure={departure} />
+              ) : (
+                <CapacityBooking key={departure.id} tour={tour} departure={departure} />
+              )}
             </div>
           </div>
     </div>

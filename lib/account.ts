@@ -13,6 +13,7 @@ export async function getUserBookings(
     take: limit,
     include: {
       passengers: { select: { seatCode: true } },
+      departure: { select: { departureDate: true, returnDate: true } },
       tour: {
         select: {
           slug: true,
@@ -33,7 +34,11 @@ export async function getUserBookings(
     quantity: b.quantity,
     createdAt: b.createdAt,
     loyaltyAwardedAt: b.loyaltyAwardedAt,
-    tour: b.tour,
+    // Kalkış tarihi rezervasyonun seferinden gelir (tur birden çok sefer içerebilir).
+    tour: {
+      ...b.tour,
+      departureDate: b.departure?.departureDate ?? b.tour.departureDate,
+    },
     seatCodes: b.passengers
       .map((p) => p.seatCode)
       .filter((c): c is string => Boolean(c)),

@@ -11,10 +11,14 @@ const CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   webp: "image/webp",
   gif: "image/gif",
+  // Tur programı belgeleri (admin panelden yüklenir, müşteri indirir).
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 
-// Yüklenen görselleri Next üzerinden servis eder — böylece nginx/statik yapılandırmasından
-// bağımsız olarak (canlıda da) çalışır.
+// Yüklenen görsel ve belgeleri Next üzerinden servis eder — böylece nginx/statik
+// yapılandırmasından bağımsız olarak (canlıda da) çalışır.
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ name: string }> }
@@ -42,6 +46,6 @@ export async function GET(
       },
     });
   } catch {
-    return NextResponse.json({ error: "Görsel bulunamadı." }, { status: 404 });
+    return NextResponse.json({ error: "Dosya bulunamadı." }, { status: 404 });
   }
 }

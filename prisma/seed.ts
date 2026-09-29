@@ -75,17 +75,61 @@ function seatUnits(layout: string, rows: number): string[][] {
   return units;
 }
 
+// Seed tarihleri bugüne GÖRECELİdir; böylece kurulum ne zaman yapılırsa yapılsın
+// turlar satışta görünür (geçmiş tarihli sefer arşive düşerdi).
+function inDays(days: number, time: string): Date {
+  const [h, m] = time.split(":").map(Number);
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  d.setHours(h ?? 0, m ?? 0, 0, 0);
+  return d;
+}
+
 async function main() {
   await prisma.passenger.deleteMany();
   await prisma.booking.deleteMany();
   await prisma.seat.deleteMany();
+  await prisma.tourDeparture.deleteMany();
+  await prisma.tourPlace.deleteMany();
   await prisma.tour.deleteMany();
+  await prisma.bus.deleteMany();
   await prisma.banner.deleteMany();
   await prisma.adminUser.deleteMany();
 
   await prisma.adminUser.create({
     data: { email: "admin@gozdemburak.com", passwordHash: hash("admin123") },
   });
+
+  // --- ARAÇ FİLOSU ---
+  // Turlar bu araçlardan birini seçer; koltuk düzeni ve plaka buradan gelir.
+  const busVip = await prisma.bus.create({
+    data: {
+      name: "30 Koltuk VIP Mercedes",
+      plate: "67 GBT 030",
+      vehicleType: "VIP",
+      seatLayout: "2+1",
+      seatRows: 14,
+      doorAfterRow: 7,
+      backRowFull: false,
+      notes: "Lüks koltuk, WC var",
+    },
+  });
+  const busStandard = await prisma.bus.create({
+    data: {
+      name: "46 Koltuk Otobüs",
+      plate: "67 GBT 046",
+      vehicleType: "OTOBUS",
+      seatLayout: "2+2",
+      seatRows: 13,
+      doorAfterRow: 6,
+      backRowFull: false,
+      notes: "Standart otobüs",
+    },
+  });
+  const busById: Record<string, string> = {
+    "kapadokya-turu": busVip.id,
+    "karadeniz-yaylalari": busStandard.id,
+  };
 
   // 5 afiş (4:5 Instagram formatı — 1080×1350)
   await prisma.banner.createMany({
@@ -109,8 +153,8 @@ async function main() {
       vehicleType: "VIP",
       seatLayout: "2+1",
       seatRows: 14,
-      departureDate: new Date("2026-08-10T20:00:00"),
-      returnDate: new Date("2026-08-12T22:00:00"),
+      departureDate: inDays(30, "20:00"),
+      returnDate: inDays(32, "22:00"),
       departureLocation: "İstanbul (Esenler Otogar)",
       durationDays: 3,
       price: 4500,
@@ -130,8 +174,8 @@ async function main() {
       vehicleType: "OTOBUS",
       seatLayout: "2+2",
       seatRows: 13,
-      departureDate: new Date("2026-08-15T19:00:00"),
-      returnDate: new Date("2026-08-20T23:00:00"),
+      departureDate: inDays(45, "19:00"),
+      returnDate: inDays(50, "23:00"),
       departureLocation: "Ankara (AŞTİ)",
       durationDays: 6,
       price: 6900,
@@ -149,8 +193,8 @@ async function main() {
       category: "YURT_DISI",
       bookingType: "KONTENJAN",
       capacity: 60,
-      departureDate: new Date("2026-09-05T06:00:00"),
-      returnDate: new Date("2026-09-13T23:00:00"),
+      departureDate: inDays(60, "06:00"),
+      returnDate: inDays(68, "23:00"),
       departureLocation: "İstanbul Havalimanı",
       durationDays: 9,
       price: 899,
@@ -168,6 +212,7 @@ async function main() {
     const tour = await prisma.tour.create({
       data: {
         ...rest,
+        busId: busById[t.slug] ?? null,
         vehicleType: vehicleType ?? null,
         seatLayout: seatLayout ?? null,
         seatRows: seatRows ?? null,
@@ -176,24 +221,100 @@ async function main() {
       },
     });
 
+    // Sefer: koltuklar ve rezervasyonlar sefere bağlıdır. Kapadokya turuna
+    // iki sefer açılır (çoklu sefer akışını denemek için), diğerlerine bir.
+    const departure = await prisma.tourDeparture.create({
+      data: {
+        tourId: tour.id,
+        departureDate: tour.departureDate,
+        returnDate: tour.returnDate,
+        capacity: capacity ?? null,
+        sortOrder: 0,
+      },
+    });
+    // Arşiv akışını göstermek için Kapadokya turuna GEÇMİŞ bir sefer de eklenir:
+    // sitede görünmez, rezervasyonları kendi seferinde durur.
+    if (t.slug === "kapadokya-turu") {
+      const pastDep = await prisma.tourDeparture.create({
+        data: {
+          tourId: tour.id,
+          departureDate: inDays(-40, "20:00"),
+          returnDate: inDays(-38, "22:00"),
+          sortOrder: 99,
+          busId: busVip.id,
+        },
+      });
+      await prisma.seat.createMany({
+        data: seatUnits(busVip.seatLayout, busVip.seatRows)
+          .flat()
+          .map((code) => ({ tourId: tour.id, departureId: pastDep.id, code, status: "BOS" })),
+      });
+    }
+    if (t.slug === "kapadokya-turu") {
+      const second = new Date(tour.departureDate);
+      second.setDate(second.getDate() + 8);
+      const secondReturn = tour.returnDate ? new Date(tour.returnDate) : null;
+      if (secondReturn) secondReturn.setDate(secondReturn.getDate() + 8);
+      const dep2 = await prisma.tourDeparture.create({
+        data: {
+          tourId: tour.id,
+          departureDate: second,
+          returnDate: secondReturn,
+          sortOrder: 1,
+          // İkinci sefer başka araçla: plaka sefer bazında değişebiliyor.
+          busId: busStandard.id,
+        },
+      });
+      // Koltuklar seferin ARACINA göre üretilir.
+      await prisma.seat.createMany({
+        data: seatUnits(busStandard.seatLayout, busStandard.seatRows)
+          .flat()
+          .map((code) => ({
+            tourId: tour.id,
+            departureId: dep2.id,
+            code,
+            status: "BOS",
+          })),
+      });
+    }
+
     // Durak/otel (rota & konaklama)
-    const placesBySlug: Record<string, { type: string; name: string; address: string; mapQuery: string; nights?: number }[]> = {
+    // BINIS: müşterinin bineceği noktalar (saat + fiyat) — GEZI: gezilecek yerler
+    // — OTEL: konaklama. Üçü ayrı bölümlerde yönetilir.
+    const placesBySlug: Record<
+      string,
+      {
+        type: string;
+        name: string;
+        address: string;
+        mapQuery: string;
+        nights?: number;
+        boardingTime?: string;
+        price?: number;
+      }[]
+    > = {
       "kapadokya-turu": [
-        { type: "DURAK", name: "İstanbul (Esenler Otogar)", address: "Esenler, İstanbul", mapQuery: "Esenler Otogar, İstanbul" },
-        { type: "DURAK", name: "Ürgüp", address: "Ürgüp, Nevşehir", mapQuery: "Ürgüp, Nevşehir" },
+        { type: "BINIS", name: "Karadeniz Ereğli Terminal", address: "Ereğli, Zonguldak", mapQuery: "Karadeniz Ereğli Otogar", boardingTime: "20:00" },
+        { type: "BINIS", name: "Zonguldak Gar", address: "Zonguldak", mapQuery: "Zonguldak Gar", boardingTime: "21:15", price: 4700 },
+        { type: "GEZI", name: "Göreme Açık Hava Müzesi", address: "Göreme, Nevşehir", mapQuery: "Göreme Açık Hava Müzesi" },
+        { type: "GEZI", name: "Uçhisar Kalesi", address: "Uçhisar, Nevşehir", mapQuery: "Uçhisar Kalesi" },
+        { type: "GEZI", name: "Avanos Çömlek Atölyeleri", address: "Avanos, Nevşehir", mapQuery: "Avanos, Nevşehir" },
         { type: "OTEL", name: "Kapadokya Cave Otel", address: "Göreme, Nevşehir", mapQuery: "Göreme, Nevşehir", nights: 2 },
       ],
       "karadeniz-yaylalari": [
-        { type: "DURAK", name: "Ankara (AŞTİ)", address: "Çankaya, Ankara", mapQuery: "AŞTİ, Ankara" },
-        { type: "DURAK", name: "Uzungöl", address: "Çaykara, Trabzon", mapQuery: "Uzungöl, Trabzon" },
-        { type: "DURAK", name: "Ayder Yaylası", address: "Çamlıhemşin, Rize", mapQuery: "Ayder Yaylası, Rize" },
+        { type: "BINIS", name: "Ankara (AŞTİ)", address: "Çankaya, Ankara", mapQuery: "AŞTİ, Ankara", boardingTime: "19:00" },
+        { type: "BINIS", name: "Kırıkkale Terminal", address: "Kırıkkale", mapQuery: "Kırıkkale Otogar", boardingTime: "20:30", price: 6700 },
+        { type: "GEZI", name: "Uzungöl", address: "Çaykara, Trabzon", mapQuery: "Uzungöl, Trabzon" },
+        { type: "GEZI", name: "Ayder Yaylası", address: "Çamlıhemşin, Rize", mapQuery: "Ayder Yaylası, Rize" },
+        { type: "GEZI", name: "Sümela Manastırı", address: "Maçka, Trabzon", mapQuery: "Sümela Manastırı" },
         { type: "OTEL", name: "Ayder Resort Otel", address: "Ayder, Rize", mapQuery: "Ayder Yaylası, Rize", nights: 5 },
       ],
       "balkan-turu": [
-        { type: "DURAK", name: "Belgrad", address: "Sırbistan", mapQuery: "Belgrad, Sırbistan" },
-        { type: "DURAK", name: "Saraybosna", address: "Bosna-Hersek", mapQuery: "Saraybosna, Bosna Hersek" },
-        { type: "DURAK", name: "Mostar", address: "Bosna-Hersek", mapQuery: "Mostar, Bosna Hersek" },
-        { type: "DURAK", name: "Kotor", address: "Karadağ", mapQuery: "Kotor, Karadağ" },
+        { type: "BINIS", name: "İstanbul Havalimanı", address: "Arnavutköy, İstanbul", mapQuery: "İstanbul Havalimanı", boardingTime: "06:00" },
+        { type: "GEZI", name: "Belgrad", address: "Sırbistan", mapQuery: "Belgrad, Sırbistan" },
+        { type: "GEZI", name: "Saraybosna", address: "Bosna-Hersek", mapQuery: "Saraybosna, Bosna Hersek" },
+        { type: "GEZI", name: "Mostar", address: "Bosna-Hersek", mapQuery: "Mostar, Bosna Hersek" },
+        { type: "GEZI", name: "Kotor", address: "Karadağ", mapQuery: "Kotor, Karadağ" },
         { type: "OTEL", name: "Belgrad City Otel", address: "Belgrad, Sırbistan", mapQuery: "Belgrad, Sırbistan", nights: 8 },
       ],
     };
@@ -207,17 +328,31 @@ async function main() {
           address: p.address,
           mapQuery: p.mapQuery,
           nights: p.nights ?? null,
+          price: p.price ?? null,
+          boardingTime: p.boardingTime ?? null,
           sortOrder: i,
         })),
       });
     }
 
     if (t.bookingType === "KOLTUK" && seatRows && seatLayout) {
-      const units = seatUnits(seatLayout, seatRows);
+      // Tura otobüs atanmışsa düzen ondan gelir (araç = tek doğruluk kaynağı).
+      const assigned = busById[t.slug]
+        ? [busVip, busStandard].find((b) => b.id === busById[t.slug])
+        : undefined;
+      const units = seatUnits(
+        assigned?.seatLayout ?? seatLayout,
+        assigned?.seatRows ?? seatRows
+      );
       const allCodes = units.flat();
       // Tüm koltukları BOŞ oluştur
       await prisma.seat.createMany({
-        data: allCodes.map((code) => ({ tourId: tour.id, code, status: "BOS" })),
+        data: allCodes.map((code) => ({
+          tourId: tour.id,
+          departureId: departure.id,
+          code,
+          status: "BOS",
+        })),
       });
 
       // Satışlar — her birim (bitişik koltuklar) bir rezervasyon
@@ -228,6 +363,7 @@ async function main() {
         await prisma.booking.create({
           data: {
             tourId: tour.id,
+            departureId: departure.id,
             status: "ODENDI",
             totalAmount: tour.price * seats.length,
             contactName: `${contact.firstName} ${contact.lastName}`,
@@ -249,7 +385,7 @@ async function main() {
         // Her koltuğa kendi cinsiyetini yaz
         for (let i = 0; i < seats.length; i++) {
           await prisma.seat.updateMany({
-            where: { tourId: tour.id, code: seats[i] },
+            where: { tourId: tour.id, departureId: departure.id, code: seats[i] },
             data: { status: "SATILDI", gender: people[i].gender },
           });
         }
@@ -262,6 +398,7 @@ async function main() {
         await prisma.booking.create({
           data: {
             tourId: tour.id,
+            departureId: departure.id,
             status: "ODENDI",
             totalAmount: tour.price * groupSize,
             contactName: `${contact.firstName} ${contact.lastName}`,

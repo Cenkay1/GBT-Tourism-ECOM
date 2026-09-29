@@ -1,20 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import ImageUpload from "@/components/admin/ImageUpload";
 import GalleryUpload from "@/components/admin/GalleryUpload";
-import PlacesEditor, { PlaceRow } from "@/components/admin/PlacesEditor";
+import type { PlaceRow } from "@/components/admin/placeTypes";
 import BoardingPointsEditor from "@/components/admin/BoardingPointsEditor";
+import PlacesToVisitEditor from "@/components/admin/PlacesToVisitEditor";
+import HotelsEditor from "@/components/admin/HotelsEditor";
+import DocumentsUpload from "@/components/admin/DocumentsUpload";
+import DeparturesEditor, { DepartureRow } from "@/components/admin/DeparturesEditor";
 import MapField from "@/components/admin/MapField";
-import type { Amenity } from "@/lib/shared";
+import { busSeatCount, type Amenity, type Bus, type TourDocument } from "@/lib/shared";
 
 export interface TourFormValues {
   title?: string;
   destination?: string;
   category?: string;
   bookingType?: string;
-  departureDate?: string; // yyyy-MM-ddTHH:mm
-  returnDate?: string;
+  departures?: DepartureRow[]; // seferler (kalkış/dönüş çiftleri)
   departureLocation?: string;
   durationDays?: number;
   price?: number;
@@ -24,10 +28,13 @@ export interface TourFormValues {
   description?: string;
   highlights?: string; // newline
   capacity?: number;
+  busId?: string;
   vehicleType?: string;
   seatRows?: number;
   doorAfterRow?: number;
   backRowFull?: boolean;
+  documents?: TourDocument[];
+  hasAccommodation?: boolean;
   singleSupplement?: number;
   status?: string;
   places?: PlaceRow[];
@@ -40,21 +47,42 @@ export default function TourForm({
   initial,
   submitLabel,
   amenities = [],
+  buses = [],
 }: {
   action: (fd: FormData) => void;
   initial?: TourFormValues;
   submitLabel: string;
   amenities?: Amenity[];
+  buses?: Bus[];
 }) {
   const [bookingType, setBookingType] = useState(initial?.bookingType ?? "KOLTUK");
+  // Seferler: en az bir kalkış/dönüş çifti. Turun kalkış tarihi en yakın seferden gelir.
+  const [departures, setDepartures] = useState<DepartureRow[]>(
+    initial?.departures?.length
+      ? initial.departures
+      : [{ departureDate: "", returnDate: "", status: "AKTIF" }]
+  );
+  // Konaklamalı tur: tek kişilik oda farkı ve satın alımda oda/yaş seçimi açılır.
+  const [hasAccommodation, setHasAccommodation] = useState(
+    initial?.hasAccommodation ?? false
+  );
   const [features, setFeatures] = useState<string[]>(initial?.features ?? []);
   const [excluded, setExcluded] = useState<string[]>(initial?.excludedFeatures ?? []);
+  // Otobüs: seçilirse koltuk düzeni ondan gelir, elle giriş alanları kapanır.
+  const [busId, setBusId] = useState(initial?.busId ?? "");
+  const selectedBus = buses.find((b) => b.id === busId);
+  const [documents, setDocuments] = useState<TourDocument[]>(initial?.documents ?? []);
+
+  // Üç ayrı yer listesi: biniş noktaları, gezilecek yerler, konaklama.
   const initialPlaces = initial?.places ?? [];
-  const [routePlaces, setRoutePlaces] = useState<PlaceRow[]>(
-    initialPlaces.filter((p) => p.type !== "BINIS")
-  );
   const [boardingPlaces, setBoardingPlaces] = useState<PlaceRow[]>(
     initialPlaces.filter((p) => p.type === "BINIS")
+  );
+  const [visitPlaces, setVisitPlaces] = useState<PlaceRow[]>(
+    initialPlaces.filter((p) => p.type === "GEZI")
+  );
+  const [hotelPlaces, setHotelPlaces] = useState<PlaceRow[]>(
+    initialPlaces.filter((p) => p.type === "OTEL")
   );
 
   function toggleFeature(id: string) {
@@ -115,14 +143,6 @@ export default function TourForm({
             Süre (gün)
             <input name="durationDays" type="number" min={1} defaultValue={initial?.durationDays ?? 1} className={input} />
           </label>
-          <label className={label}>
-            Kalkış Tarihi/Saati *
-            <input name="departureDate" type="datetime-local" required defaultValue={initial?.departureDate} className={input} />
-          </label>
-          <label className={label}>
-            Dönüş Tarihi/Saati
-            <input name="returnDate" type="datetime-local" defaultValue={initial?.returnDate} className={input} />
-          </label>
         </div>
       </Card>
 
@@ -140,11 +160,43 @@ export default function TourForm({
               <option value="USD">$ USD</option>
             </select>
           </label>
-          <label className={label}>
-            Tek Kişilik Konaklama Farkı (₺)
-            <input name="singleSupplement" type="number" min={0} defaultValue={initial?.singleSupplement ?? 2000} className={input} />
-            <span className="mt-1 block text-xs text-slate-400">Otelli turlarda tek kişilik konaklama seçen müşteriye eklenir.</span>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-slate-100 p-4">
+          <label className="flex items-start gap-2.5 text-sm font-medium text-slate-700">
+            <input
+              name="hasAccommodation"
+              type="checkbox"
+              checked={hasAccommodation}
+              onChange={(e) => setHasAccommodation(e.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              Konaklamalı tur
+              <span className="mt-0.5 block text-xs font-normal text-slate-400">
+                İşaretlerseniz müşteri satın alırken oda oda kişi sayısı girer
+                (yetişkin 12+, çocuk 4-12, bebek 0-3; bir odada en fazla 3 kişi) ve tek
+                kişilik kalan her oda için aşağıdaki fark eklenir.
+              </span>
+            </span>
           </label>
+
+          {hasAccommodation && (
+            <label className={`${label} mt-4 sm:max-w-xs`}>
+              Tek Kişi Farkı (₺ / oda)
+              <input
+                name="singleSupplement"
+                type="number"
+                min={0}
+                defaultValue={initial?.singleSupplement ?? 2000}
+                className={input}
+              />
+              <span className="mt-1 block text-xs text-slate-400">
+                Odada tek başına kalan müşteriye kişi başı fiyatın üstüne eklenir. 2 veya 3
+                kişilik odalarda eklenmez.
+              </span>
+            </label>
+          )}
         </div>
       </Card>
 
@@ -156,32 +208,90 @@ export default function TourForm({
         <input type="hidden" name="bookingType" value={bookingType} />
 
         {bookingType === "KOLTUK" ? (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="mt-4 space-y-4">
+            {/* Otobüs seçimi — düzen araçtan gelir */}
             <label className={label}>
-              Araç Tipi
-              <select name="vehicleType" defaultValue={initial?.vehicleType ?? "OTOBUS"} className={input}>
-                <option value="OTOBUS">Otobüs — 2+2 (standart)</option>
-                <option value="VIP">Lüks / VIP — 2+1</option>
-                <option value="MINIBUS">Minibüs / Küçük — 1+1</option>
+              Otobüs
+              <select
+                name="busId"
+                value={busId}
+                onChange={(e) => setBusId(e.target.value)}
+                className={input}
+              >
+                <option value="">— Otobüs seçilmedi (düzeni elle gir) —</option>
+                {buses.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.plate} — {b.name} ({busSeatCount(b)} koltuk, {b.seatLayout})
+                    {!b.active ? " · pasif" : ""}
+                  </option>
+                ))}
               </select>
+              <span className="mt-1 block text-xs text-slate-400">
+                {buses.length === 0 ? (
+                  <>
+                    Henüz otobüs tanımlı değil.{" "}
+                    <Link href="/admin/otobusler/yeni" className="font-medium text-brand underline">
+                      Otobüslerim
+                    </Link>{" "}
+                    sayfasından ekleyin — koltuk düzeni ve plaka oradan gelir.
+                  </>
+                ) : (
+                  "Otobüs seçerseniz koltuk şeması birebir o araçtan oluşur ve hatırlatma mesajlarında plaka yazar. Her sefere ayrı otobüs atayabilirsiniz (Seferler bölümü)."
+                )}
+              </span>
             </label>
-            <label className={label}>
-              Sıra Sayısı
-              <input name="seatRows" type="number" min={1} max={20} defaultValue={initial?.seatRows ?? 12} className={input} />
-            </label>
-            <label className={label}>
-              Orta Kapı Sırası
-              <input name="doorAfterRow" type="number" min={1} max={20} defaultValue={initial?.doorAfterRow ?? ""} placeholder="Örn. 14" className={input} />
-              <span className="mt-1 block text-xs text-slate-400">Kapı bu sıradan sonra çizilir. Boş = kapı yok.</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-600 sm:col-span-2">
-              <input name="backRowFull" type="checkbox" defaultChecked={initial?.backRowFull} className="h-4 w-4" />
-              Son sırada koridorda da koltuk olsun (tam sıra)
-            </label>
-            <p className="text-xs text-slate-400 sm:col-span-2">
-              Araç tipi koltuk düzenini belirler (Otobüs 4, VIP 3, Minibüs 2 koltuk/sıra). Koltuklar
-              kaydettiğinizde otomatik oluşturulur. Satış/rezervasyon başladıysa düzen değiştirilemez.
-            </p>
+
+            {selectedBus ? (
+              <div className="rounded-xl border border-brand/20 bg-brand/5 p-4 text-sm">
+                <p className="font-semibold text-brand">
+                  {selectedBus.plate} · {selectedBus.name}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {busSeatCount(selectedBus)} koltuk · {selectedBus.seatLayout} ·{" "}
+                  {selectedBus.doorAfterRow
+                    ? `kapı ${selectedBus.doorAfterRow}. sıradan sonra`
+                    : "orta kapı yok"}
+                  {selectedBus.backRowFull && " · son sıra tam"}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Düzen bu araçtan alınır.{" "}
+                  <Link
+                    href={`/admin/otobusler/${selectedBus.id}`}
+                    className="font-medium text-brand underline"
+                  >
+                    Otobüsü düzenle
+                  </Link>
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className={label}>
+                  Araç Tipi
+                  <select name="vehicleType" defaultValue={initial?.vehicleType ?? "OTOBUS"} className={input}>
+                    <option value="OTOBUS">Otobüs — 2+2 (standart)</option>
+                    <option value="VIP">Lüks / VIP — 2+1</option>
+                    <option value="MINIBUS">Minibüs / Küçük — 1+1</option>
+                  </select>
+                </label>
+                <label className={label}>
+                  Sıra Sayısı
+                  <input name="seatRows" type="number" min={1} max={20} defaultValue={initial?.seatRows ?? 12} className={input} />
+                </label>
+                <label className={label}>
+                  Orta Kapı Sırası
+                  <input name="doorAfterRow" type="number" min={1} max={20} defaultValue={initial?.doorAfterRow ?? ""} placeholder="Örn. 14" className={input} />
+                  <span className="mt-1 block text-xs text-slate-400">Kapı bu sıradan sonra çizilir. Boş = kapı yok.</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-600 sm:col-span-2">
+                  <input name="backRowFull" type="checkbox" defaultChecked={initial?.backRowFull} className="h-4 w-4" />
+                  Son sırada koridorda da koltuk olsun (tam sıra)
+                </label>
+                <p className="text-xs text-slate-400 sm:col-span-2">
+                  Araç tipi koltuk düzenini belirler (Otobüs 4, VIP 3, Minibüs 2 koltuk/sıra). Koltuklar
+                  kaydettiğinizde otomatik oluşturulur. Satışı başlamış seferlerin düzeni değiştirilmez.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -191,6 +301,23 @@ export default function TourForm({
             </label>
           </div>
         )}
+      </Card>
+
+      <Card title="Seferler (Kalkış Tarihleri)">
+        <p className="mb-3 text-xs text-slate-400">
+          Bu tur birden çok sefer içerebilir — örn. ayın 12&apos;si (dönüş 17&apos;si) ve 18&apos;i
+          (dönüş 24&apos;ü) ya da her hafta Salı. Her seferin <strong>kendi koltuk düzeni /
+          kontenjanı</strong> vardır; müşteri satın alırken hangi seferi aldığını seçer. Turun
+          listelerde görünen kalkış tarihi, satışa açık en yakın seferdir.
+        </p>
+        <input type="hidden" name="departures" value={JSON.stringify(departures)} />
+        <DeparturesEditor
+          value={departures}
+          onChange={setDepartures}
+          bookingType={bookingType}
+          buses={buses}
+          defaultBusId={busId}
+        />
       </Card>
 
       <Card title="Görseller ve Açıklama">
@@ -212,6 +339,12 @@ export default function TourForm({
           Açıklama
           <textarea name="description" rows={4} defaultValue={initial?.description} className={input} />
         </label>
+        <div className="mt-4">
+          <span className={label}>Tur Programı Belgeleri (PDF / Word)</span>
+          <div className="mt-1">
+            <DocumentsUpload name="documents" value={documents} onChange={setDocuments} />
+          </div>
+        </div>
         <label className={`${label} mt-4`}>
           Öne Çıkanlar (her satıra bir madde)
           <textarea name="highlights" rows={3} defaultValue={initial?.highlights} className={input} placeholder={"2 gece konaklama\nRehberlik dahil"} />
@@ -223,9 +356,9 @@ export default function TourForm({
         {amenities.length === 0 ? (
           <p className="text-sm text-slate-400">
             Henüz özellik tanımlanmamış.{" "}
-            <a href="/admin/ozellikler" className="font-medium text-brand underline">
+            <Link href="/admin/ozellikler" className="font-medium text-brand underline">
               Özellikler
-            </a>{" "}
+            </Link>{" "}
             sayfasından ekleyin (Konaklama, Kahvaltı, Rehber…).
           </p>
         ) : (
@@ -269,9 +402,9 @@ export default function TourForm({
         {amenities.length === 0 ? (
           <p className="text-sm text-slate-400">
             Önce{" "}
-            <a href="/admin/ozellikler" className="font-medium text-brand underline">
+            <Link href="/admin/ozellikler" className="font-medium text-brand underline">
               Özellikler
-            </a>{" "}
+            </Link>{" "}
             sayfasından hizmet tanımlayın.
           </p>
         ) : (
@@ -310,31 +443,43 @@ export default function TourForm({
         )}
       </Card>
 
-      <input type="hidden" name="places" value={JSON.stringify([...boardingPlaces, ...routePlaces])} />
+      <input
+        type="hidden"
+        name="places"
+        value={JSON.stringify([...boardingPlaces, ...visitPlaces, ...hotelPlaces])}
+      />
 
       <Card title="Biniş Noktaları">
         <p className="mb-3 text-xs text-slate-400">
-          Müşterinin <strong>&quot;Nereden bineceksiniz?&quot;</strong> adımında seçeceği noktalar.
-          Her birine kişi başı fiyat girebilirsiniz; müşteri o noktadan binmeyi seçince o fiyat uygulanır (boş bırakılırsa tur fiyatı geçerli).
+          Müşterinin <strong>&quot;Nereden bineceksiniz?&quot;</strong> adımında seçeceği noktalar —
+          gezilecek yerlerden tamamen ayrıdır. Her noktaya <strong>saat</strong> (otobüs kaçta orada
+          olacak) ve <strong>kişi başı fiyat</strong> girebilirsiniz; fiyat boşsa tur fiyatı geçerlidir.
         </p>
         <BoardingPointsEditor value={boardingPlaces} onChange={setBoardingPlaces} />
       </Card>
 
-      <Card title="Rota & Konaklama (Harita)">
+      <Card title="Gezilecek Yerler">
         <p className="mb-3 text-xs text-slate-400">
-          Turun güzergâh durakları ve (konaklamalıysa) otelleri. Her biri tur sayfasında haritada gösterilir.
-          Bu alan yalnızca bilgi/harita amaçlıdır; fiyat biniş noktalarından belirlenir.
+          Turda gezilecek noktalar. Sırayla listelenir; işaretlediklerinizi tur sayfasındaki
+          haritada pin olarak gösteririz. Biniş noktalarıyla karıştırılmaz.
         </p>
-        <PlacesEditor value={routePlaces} onChange={setRoutePlaces} />
+        <PlacesToVisitEditor value={visitPlaces} onChange={setVisitPlaces} />
+      </Card>
+
+      <Card title="Konaklama (Otel)">
+        <p className="mb-3 text-xs text-slate-400">
+          Konaklamalı turlarda kalınacak oteller ve gece sayıları. Tur sayfasındaki haritada gösterilir.
+        </p>
+        <HotelsEditor value={hotelPlaces} onChange={setHotelPlaces} />
       </Card>
 
       <div className="flex gap-3">
         <button className="rounded-lg bg-accent px-6 py-2.5 text-sm font-bold text-white hover:bg-accent-dark">
           {submitLabel}
         </button>
-        <a href="/admin/turlar" className="rounded-lg border border-slate-200 px-6 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
+        <Link href="/admin/turlar" className="rounded-lg border border-slate-200 px-6 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50">
           Vazgeç
-        </a>
+        </Link>
       </div>
     </form>
   );

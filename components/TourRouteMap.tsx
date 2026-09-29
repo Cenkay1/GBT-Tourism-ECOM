@@ -11,7 +11,7 @@ const API_KEY = GOOGLE_MAPS_KEY;
 
 type Point = {
   id: string;
-  kind: "KALKIS" | "DURAK" | "OTEL" | "BINIS";
+  kind: "KALKIS" | "BINIS" | "GEZI" | "OTEL";
   name: string;
   address?: string;
   nights?: number;
@@ -310,7 +310,7 @@ export default function TourRouteMap({
 
   return (
     <div className="grid gap-4 md:grid-cols-[260px_1fr]">
-      {/* Kalkış / durak / otel listesi */}
+      {/* Kalkış / biniş / gezilecek yer / otel listesi */}
       <ol className="space-y-2">
         {points.map((p, i) => {
           const kindLabel =
@@ -320,7 +320,7 @@ export default function TourRouteMap({
                 ? "Konaklama" + (p.nights ? ` · ${p.nights} gece` : "")
                 : p.kind === "BINIS"
                   ? "Biniş Noktası"
-                  : `Durak ${++durakNo}`;
+                  : `${++durakNo}. Gezilecek Yer`;
           return (
             <li key={p.id || i}>
               <button

@@ -22,6 +22,15 @@ const payStyle: Record<string, string> = {
   ONLINE: "bg-sky-50 text-sky-700",
 };
 
+// Yaş onayı bekleyen (çocuk/bebek, onaylanmamış) yolcu sayısı.
+function pendingAgeCount(
+  passengers: { ageBand: string | null; ageVerified: boolean }[]
+): number {
+  return passengers.filter(
+    (p) => p.ageBand && p.ageBand !== "ADULT" && !p.ageVerified
+  ).length;
+}
+
 export default async function AdminBookings() {
   const bookings = await prisma.booking.findMany({
     orderBy: { createdAt: "desc" },
@@ -92,6 +101,12 @@ export default async function AdminBookings() {
                       >
                         {statusLabel[b.status] ?? b.status}
                       </span>
+                      {/* Çocuk/bebek yaşı onay bekliyorsa listede de görünsün. */}
+                      {pendingAgeCount(b.passengers) > 0 && (
+                        <span className="mt-1 block rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
+                          ⚠ {pendingAgeCount(b.passengers)} yaş onayı bekliyor
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span

@@ -11,6 +11,27 @@ datasource db {
   provider = "sqlite"
 }
 
+// Acentenin araç filosu. Admin "Otobüslerim" sekmesinden tanımlar; turlar ve
+// seferler buradan araç seçer. Koltuk düzeni (sıra, kapı, son sıra) ve plaka
+// araçta tutulur — böylece turda birebir doğru şema oluşur ve hatırlatma
+// mesajlarında plaka yazılır.
+model Bus {
+  id           String   @id @default(cuid())
+  name         String // tanınması için etiket, örn. "45 Koltuk Mercedes"
+  plate        String // 34 ABC 123
+  vehicleType  String // OTOBUS | VIP | MINIBUS (koltuk düzenini belirler)
+  seatLayout   String // 2+2 | 2+1 | 1+1 (araç tipinden türetilir)
+  seatRows     Int
+  doorAfterRow Int? // orta kapı bu sıradan sonra (null = kapı yok)
+  backRowFull  Boolean  @default(false) // son sırada koridorda da koltuk
+  notes        String   @default("")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  tours      Tour[]
+  departures TourDeparture[]
+}
+
 model Tour {
   id                String    @id @default(cuid())
   slug              String    @unique
@@ -28,83 +49,128 @@ model Tour {
   images            String    @default("[]") // JSON dizi
   description       String    @default("")
   highlights        String    @default("[]") // JSON dizi
+  documents         String    @default("[]") // tur programı dosyaları (PDF/Word) JSON dizi
   capacity          Int? // KONTENJAN turları için
+  // Araç: otobüs seçilirse koltuk düzeni ondan gelir (aşağıdaki alanlar otobüsten
+  // kopyalanır). Otobüs seçilmezse alanlar elle girilir (eski turlar böyle).
+  busId             String?
+  bus               Bus?      @relation(fields: [busId], references: [id])
   vehicleType       String? // OTOBUS | VIP | MINIBUS (KOLTUK turları için)
   seatLayout        String? // 2+2 | 2+1 | 1+1 (araç tipinden türetilir)
   seatRows          Int?
   doorAfterRow      Int? // orta kapı bu sıradan sonra (null = kapı yok)
   backRowFull       Boolean   @default(false) // son sırada koridorda ekstra koltuk
-  singleSupplement  Int       @default(2000) // tek kişilik konaklama farkı
+  hasAccommodation  Boolean   @default(false) // konaklamalı tur (oda/kişi fiyatlaması açılır)
+  singleSupplement  Int       @default(2000) // tek kişilik konaklanan her oda için eklenen fark
   features          String    @default("[]") // seçili özellik id'leri (JSON dizi)
   excludedFeatures  String    @default("[]") // fiyata dahil OLMAYAN özellik id'leri (JSON dizi)
   status            String    @default("YAYINDA") // TASLAK | YAYINDA
   createdAt         DateTime  @default(now())
 
+  seats      Seat[]
+  bookings   Booking[]
+  places     TourPlace[]
+  departures TourDeparture[]
+}
+
+// Bir turun ayrı seferi (kalkış/dönüş çifti). Koltuklar ve rezervasyonlar
+// sefere bağlıdır; aynı tur birden çok sefer içerebilir (örn. 12'si ve 18'i).
+// Tour.departureDate/returnDate en yakın AKTIF seferi yansıtır (liste/sıralama için).
+model TourDeparture {
+  id            String    @id @default(cuid())
+  tourId        String
+  tour          Tour      @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  departureDate DateTime
+  returnDate    DateTime?
+  capacity      Int? // KONTENJAN turlarında sefer bazlı kontenjan (boşsa turun kontenjanı)
+  busId         String? // bu seferin aracı (boşsa turun varsayılan otobüsü)
+  bus           Bus?      @relation(fields: [busId], references: [id])
+  status        String    @default("AKTIF") // AKTIF | KAPALI (satışa kapalı)
+  sortOrder     Int       @default(0)
+  createdAt     DateTime  @default(now())
+
   seats    Seat[]
   bookings Booking[]
-  places   TourPlace[]
+
+  @@index([tourId, departureDate])
 }
 
 model TourPlace {
-  id        String  @id @default(cuid())
-  tourId    String
-  tour      Tour    @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  type      String // DURAK | OTEL
-  name      String
-  address   String?
-  mapQuery  String? // gömme harita için: adres veya "enlem,boylam"
-  nights    Int? // OTEL için gece sayısı (opsiyonel)
-  price     Int? // DURAK için biniş noktası bazlı kişi başı fiyat (opsiyonel; boşsa tur fiyatı)
-  sortOrder Int     @default(0)
+  id           String  @id @default(cuid())
+  tourId       String
+  tour         Tour    @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  type         String // BINIS (biniş noktası) | GEZI (gezilecek yer) | OTEL (konaklama)
+  name         String
+  address      String?
+  mapQuery     String? // gömme harita için: adres veya "enlem,boylam"
+  nights       Int? // OTEL için gece sayısı (opsiyonel)
+  price        Int? // BINIS için biniş noktası bazlı kişi başı fiyat (boşsa tur fiyatı)
+  boardingTime String? // BINIS için otobüsün o noktada olacağı saat, "HH:MM"
+  showOnMap    Boolean @default(true) // GEZI için haritada gösterilsin mi
+  sortOrder    Int     @default(0)
+
+  bookings Booking[] // bu noktadan binmeyi seçen rezervasyonlar
 }
 
 model Seat {
-  id     String  @id @default(cuid())
-  tourId String
-  tour   Tour    @relation(fields: [tourId], references: [id], onDelete: Cascade)
-  code   String
-  status String  @default("BOS") // BOS | KILITLI | SATILDI
-  gender String? // E | K — dolu koltuğun yolcu cinsiyeti (yan yana kuralı için)
+  id          String         @id @default(cuid())
+  tourId      String
+  tour        Tour           @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  departureId String? // koltuğun ait olduğu sefer (backfill sonrası her zaman dolu)
+  departure   TourDeparture? @relation(fields: [departureId], references: [id], onDelete: Cascade)
+  code        String
+  status      String         @default("BOS") // BOS | KILITLI | SATILDI | BLOKE
+  gender      String? // E | K — dolu koltuğun yolcu cinsiyeti (yan yana kuralı için)
 
-  @@unique([tourId, code])
+  @@unique([departureId, code])
+  @@index([tourId])
 }
 
 model Booking {
-  id            String    @id @default(cuid())
-  tourId        String
-  tour          Tour      @relation(fields: [tourId], references: [id])
-  status        String    @default("BEKLIYOR") // BEKLIYOR | ODENDI | IPTAL | SURE_DOLDU
-  totalAmount   Int
-  contactName   String
-  contactPhone  String
-  contactEmail  String
-  quantity      Int       @default(1)
-  boardingName   String?   // yolcunun binis noktasi (secilen DURAK adi)
-  paymentMethod  String    @default("ONLINE") // ONLINE | NAKIT
+  id                String         @id @default(cuid())
+  tourId            String
+  tour              Tour           @relation(fields: [tourId], references: [id])
+  departureId       String? // rezervasyonun ait olduğu sefer (backfill sonrası her zaman dolu)
+  departure         TourDeparture? @relation(fields: [departureId], references: [id])
+  status            String         @default("BEKLIYOR") // BEKLIYOR | ODENDI | IPTAL | SURE_DOLDU
+  totalAmount       Int
+  contactName       String
+  contactPhone      String
+  contactEmail      String
+  quantity          Int            @default(1)
+  boardingName      String? // yolcunun biniş noktası adı (anlık kopya)
+  boardingPlaceId   String? // seçilen biniş noktası (güncel saat için)
+  boardingPlace     TourPlace?     @relation(fields: [boardingPlaceId], references: [id])
+  paymentMethod     String         @default("ONLINE") // ONLINE | NAKIT
   accommodationType String? // SINGLE | MULTI | null (konaklamasız turda null)
-  paymentRef     String?
-  holdExpiresAt  DateTime?
-  reminderSentAt DateTime? // 24s öncesi hatırlatma gönderildi mi
-  userId           String?   // giriş yapan müşteri (misafir rezervasyonlarda null)
-  user             User?     @relation(fields: [userId], references: [id])
-  loyaltyAwardedAt DateTime? // sadakat puanı yazıldı mı (idempotent kontrolü)
-  createdAt      DateTime  @default(now())
+  rooms             String? // oda dağılımı, "2-1-0|1-0-1" (yetişkin-çocuk-bebek)
+  paymentRef        String?
+  holdExpiresAt     DateTime?
+  reminderSentAt    DateTime? // 24s öncesi hatırlatma gönderildi mi
+  userId            String? // giriş yapan müşteri (misafir rezervasyonlarda null)
+  user              User?          @relation(fields: [userId], references: [id])
+  loyaltyAwardedAt  DateTime? // sadakat puanı yazıldı mı (idempotent kontrolü)
+  createdAt         DateTime       @default(now())
 
   passengers Passenger[]
 }
 
 model Passenger {
-  id        String  @id @default(cuid())
-  bookingId String
-  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  firstName String
-  lastName  String
-  idNumber  String?
-  seatCode  String?
-  gender    String?
+  id          String    @id @default(cuid())
+  bookingId   String
+  booking     Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  firstName   String
+  lastName    String
+  idNumber    String?
+  seatCode    String?
+  gender      String?
   birthDate   DateTime?
-  nationality String?   // TC | FOREIGN
-  country     String?   // ülke adı (TC ise "Türkiye")
+  nationality String? // TC | FOREIGN
+  country     String? // ülke adı (TC ise "Türkiye")
+  ageBand     String? // ADULT | CHILD | INFANT (satın alımda bildirilen yaş bandı)
+  roomIndex   Int? // konaklamalı turda yolcunun odası (0 tabanlı)
+  idDocument  String? // yaş doğrulama için yüklenen kimlik görseli (yolu)
+  ageVerified Boolean   @default(false) // admin çocuk/bebek yaşını onayladı mı
 }
 
 model Banner {

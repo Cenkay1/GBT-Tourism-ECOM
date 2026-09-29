@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Tour,
+  TourDeparture,
   Gender,
   buildSeatGrid,
   formatPrice,
@@ -21,15 +22,35 @@ interface Picked {
   gender: Gender;
 }
 
-export default function SeatMap({ tour }: { tour: Tour }) {
-  const rows = useMemo(() => buildSeatGrid(tour), [tour]);
+export default function SeatMap({
+  tour,
+  departure,
+}: {
+  tour: Tour;
+  departure?: TourDeparture;
+}) {
+  // Koltuk durumu sefer bazlıdır; sefer verilmezse tur seviyesi duruma düşülür.
+  const rows = useMemo(
+    () =>
+      buildSeatGrid(
+        tour,
+        departure
+          ? {
+              soldSeats: departure.soldSeats,
+              blockedSeats: departure.blockedSeats,
+              seatGenders: departure.seatGenders,
+            }
+          : undefined
+      ),
+    [tour, departure]
+  );
   const [selected, setSelected] = useState<Picked[]>([]);
   const [picking, setPicking] = useState<string | null>(null);
   const [warning, setWarning] = useState<string>("");
   const router = useRouter();
 
   const layout = tour.seatLayout ?? "2+2";
-  const takenGenders = tour.seatGenders ?? {};
+  const takenGenders = departure?.seatGenders ?? tour.seatGenders ?? {};
 
   // Biniş durakları (varsa) — seçime göre kişi başı fiyat değişir.
   const stops = (tour.places ?? []).filter((p) => p.type === "BINIS");
@@ -84,6 +105,7 @@ export default function SeatMap({ tour }: { tour: Tour }) {
   function goToCheckout() {
     const koltuklar = selected.map((s) => `${s.code}:${s.gender}`).join(",");
     const params = new URLSearchParams({ tur: tour.slug, koltuklar });
+    if (departure) params.set("sefer", departure.id);
     if (boardingId) params.set("durak", boardingId);
     router.push(`/rezervasyon?${params}`);
   }

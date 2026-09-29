@@ -1,5 +1,19 @@
 import { prisma } from "@/lib/db";
-import { isValidId, isValidPhone, seatNeighbor, genderLabel, priceBooking } from "@/lib/shared";
+import { isValidIdDocumentName } from "@/lib/id-documents";
+import {
+  isValidId,
+  isValidPhone,
+  seatNeighbor,
+  genderLabel,
+  priceBooking,
+  passengerBand,
+  decodeRooms,
+  roomsTotal,
+  assignRooms,
+  validateRooms,
+  type AgeBand,
+  type RoomPlan,
+} from "@/lib/shared";
 
 export const HOLD_MINUTES = 15;
 
@@ -12,10 +26,13 @@ export interface PassengerInput {
   birthDate?: string; // yyyy-mm-dd
   nationality?: "TC" | "FOREIGN";
   country?: string;
+  roomIndex?: number; // konaklamalı turda yolcunun odası (0 tabanlı)
+  idDocument?: string; // yaş doğrulama belgesi dosya adı (/api/kimlik'ten döner)
 }
 
 export interface CreateBookingInput {
   tourId: string;
+  departureId?: string; // satın alınan sefer (yoksa en yakın AKTIF sefere düşer)
   contactName: string;
   contactPhone: string;
   contactEmail: string;
@@ -24,8 +41,20 @@ export interface CreateBookingInput {
   quantity?: number; // KONTENJAN turları için
   boardingPlaceId?: string; // seçilen biniş durağı (fiyatı buradan belirlenir)
   allowBlocked?: boolean; // acente elden satışı: BLOKE koltuklar da satılabilir
+  allowPast?: boolean; // acente elden satışı: tarihi geçmiş (arşiv) sefere de kayıt
   userId?: string; // giriş yapan müşteri (sadakat için; misafirde undefined)
-  accommodationType?: "SINGLE" | "MULTI"; // konaklamalı turda tek/çok kişi
+  accommodationType?: "SINGLE" | "MULTI"; // eski akış: konaklamalı turda tek/çok kişi
+  rooms?: string; // konaklamalı turda oda dağılımı, "2-1-0|1-0-1"
+}
+
+// Eski "SINGLE / MULTI" alanı raporlarda kullanılıyor; oda dağılımı varsa
+// tek kişilik oda olup olmadığına göre türetilir.
+function accommodationTypeOf(
+  legacy: "SINGLE" | "MULTI" | undefined,
+  rooms: RoomPlan
+): string | null {
+  if (rooms.length === 0) return legacy ?? null;
+  return rooms.some((n) => n === 1) ? "SINGLE" : "MULTI";
 }
 
 export type CreateResult =
@@ -51,7 +80,13 @@ export async function releaseExpiredHolds(): Promise<void> {
       ...(seatCodes.length
         ? [
             prisma.seat.updateMany({
-              where: { tourId: b.tourId, code: { in: seatCodes }, status: "KILITLI" },
+              // Koltuklar sefer bazlı: yalnız bu seferin koltukları serbest bırakılır.
+              where: {
+                tourId: b.tourId,
+                ...(b.departureId ? { departureId: b.departureId } : {}),
+                code: { in: seatCodes },
+                status: "KILITLI",
+              },
               data: { status: "BOS", gender: null },
             }),
           ]
@@ -71,6 +106,28 @@ export async function createPendingBooking(
   if (tour.status !== "YAYINDA")
     return { ok: false, error: "Bu tur şu anda satışta değil." };
 
+  // Sefer: istemciden gelen id doğrulanır; yoksa satışa açık en yakın sefere düşülür.
+  const departure = input.departureId
+    ? await prisma.tourDeparture.findFirst({
+        where: { id: input.departureId, tourId: tour.id },
+      })
+    : await prisma.tourDeparture.findFirst({
+        where: { tourId: tour.id, status: "AKTIF" },
+        orderBy: { departureDate: "asc" },
+      });
+  if (!departure)
+    return { ok: false, error: "Seçilen sefer bulunamadı. Lütfen tekrar seçin." };
+  if (departure.status !== "AKTIF")
+    return { ok: false, error: "Bu sefer şu anda satışta değil." };
+  // Tarihi geçen sefer arşivdedir: online satış kapalıdır. Acente elden satışta
+  // (allowPast) geçmiş sefere kayıt girebilir — sonradan işlenen nakit satışlar için.
+  if (!input.allowPast && departure.departureDate < new Date())
+    return {
+      ok: false,
+      error: "Bu seferin tarihi geçmiş; satışa kapalıdır. Lütfen başka bir kalkış tarihi seçin.",
+    };
+  const departureIso = departure.departureDate.toISOString();
+
   // Sunucu tarafı doğrulama (istemci atlanırsa güvenlik için)
   if (!isValidPhone(input.contactPhone))
     return { ok: false, error: "Geçerli bir telefon numarası girin." };
@@ -89,17 +146,67 @@ export async function createPendingBooking(
       return { ok: false, error: "Yabancı uyruklu yolcu için ülke seçin." };
   }
 
+  // --- Konaklama: oda dağılımı ve yaş bandı doğrulaması ---
+  // Fiyat istemciden DEĞİL, burada yeniden hesaplanır.
+  const accommodation =
+    tour.hasAccommodation ||
+    (await prisma.tourPlace.count({ where: { tourId: tour.id, type: "OTEL" } })) > 0;
+
+  // Yaş grupları YALNIZCA doğum tarihinden hesaplanır (istemciden bildirilen
+  // band kabul edilmez) — fiyat ve oda kuralları bu bandlara dayanır.
+  const bands: AgeBand[] = input.passengers.map((p) =>
+    passengerBand({ birthDate: p.birthDate }, departureIso)
+  );
+
+  let rooms: RoomPlan = [];
+  if (accommodation) {
+    rooms = decodeRooms(input.rooms);
+    // Oda bilgisi gönderildiyse ayrıştırılabilmesi zorunlu: bozuk veriyle
+    // sessizce eski (oda farkı hesaplamayan) akışa düşülmemeli.
+    if (input.rooms?.trim() && rooms.length === 0)
+      return { ok: false, error: "Oda bilgisi okunamadı. Lütfen oda seçimini tekrar yapın." };
+    if (rooms.length > 0) {
+      const roomsErr = validateRooms(rooms, bands);
+      if (roomsErr) return { ok: false, error: roomsErr };
+      if (roomsTotal(rooms) !== input.passengers.length)
+        return {
+          ok: false,
+          error: `Odalara ${input.passengers.length} kişi yerleştirilmeli (şu an ${roomsTotal(rooms)}).`,
+        };
+    }
+  }
+
+  // Yolcunun odası sunucuda hesaplanır (istemciden gelen değere güvenilmez):
+  // her odaya bir yetişkin düşecek şekilde dağıtılır.
+  const roomOf = rooms.length > 0 ? assignRooms(rooms, bands) : [];
+
+  // Belge dosya adları istemciden gelir; biçimi doğrulanmayanlar YOK sayılır
+  // (dolayısıyla o yolcu tam ücret öder — uydurma ad indirim sağlamaz).
+  const docNames = input.passengers.map((p) =>
+    p.idDocument && isValidIdDocumentName(p.idDocument) ? p.idDocument : null
+  );
+
+  // priceBooking'e verilecek yolcu listesi: doğum tarihi + belge durumu.
+  const pricePassengers = input.passengers.map((p, i) => ({
+    birthDate: p.birthDate,
+    hasIdDocument: Boolean(docNames[i]),
+  }));
+
   const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
 
   // Biniş durağı bazlı fiyat: seçilen DURAK'ın fiyatı varsa onu kullan, yoksa tur fiyatı.
   let unitPrice = tour.price;
   let boardingName: string | null = null;
+  let boardingPlaceId: string | null = null;
   if (input.boardingPlaceId) {
     const place = await prisma.tourPlace.findFirst({
       where: { id: input.boardingPlaceId, tourId: tour.id, type: "BINIS" },
     });
     if (place) {
       boardingName = place.name;
+      // Biniş saati gibi bilgiler zamanla güncellenebildiği için noktanın
+      // id'si de saklanır; bildirimler güncel saati buradan okur.
+      boardingPlaceId = place.id;
       if (place.price != null) unitPrice = place.price;
     }
   }
@@ -122,7 +229,7 @@ export async function createPendingBooking(
     // Seçilen koltukların hepsi BOŞ mu? + yan yana cinsiyet kuralı. Atomik kilitleme.
     const result = await prisma.$transaction(async (tx) => {
       const seats = await tx.seat.findMany({
-        where: { tourId: tour.id, code: { in: codes } },
+        where: { tourId: tour.id, departureId: departure.id, code: { in: codes } },
       });
       if (seats.length !== codes.length)
         return { ok: false as const, error: "Geçersiz koltuk seçimi." };
@@ -137,7 +244,7 @@ export async function createPendingBooking(
 
       // Bitişik dolu koltuklarla cinsiyet çakışması var mı?
       const takenSeats = await tx.seat.findMany({
-        where: { tourId: tour.id, status: { not: "BOS" } },
+        where: { tourId: tour.id, departureId: departure.id, status: { not: "BOS" } },
         select: { code: true, gender: true },
       });
       const takenGender: Record<string, string | null> = {};
@@ -161,14 +268,16 @@ export async function createPendingBooking(
 
       const amount = priceBooking({
         unitPrice,
-        departureDate: tour.departureDate.toISOString(),
-        passengers: input.passengers,
+        departureDate: departureIso,
+        passengers: pricePassengers,
+        rooms: rooms.length ? rooms : undefined,
         accommodationType: input.accommodationType,
         singleSupplement: tour.singleSupplement,
       }).total;
       const booking = await tx.booking.create({
         data: {
           tourId: tour.id,
+          departureId: departure.id,
           status: "BEKLIYOR",
           totalAmount: amount,
           contactName: input.contactName,
@@ -176,7 +285,9 @@ export async function createPendingBooking(
           contactEmail: input.contactEmail,
           quantity: codes.length,
           boardingName,
-          accommodationType: input.accommodationType ?? null,
+          boardingPlaceId,
+          accommodationType: accommodationTypeOf(input.accommodationType, rooms),
+          rooms: rooms.length ? input.rooms ?? null : null,
           userId: input.userId ?? null,
           holdExpiresAt,
           passengers: {
@@ -189,6 +300,10 @@ export async function createPendingBooking(
               birthDate: p.birthDate ? new Date(p.birthDate) : null,
               nationality: p.nationality === "FOREIGN" ? "FOREIGN" : "TC",
               country: p.nationality === "FOREIGN" ? p.country || null : "Türkiye",
+              // Yaş grubu ve oda, doğum tarihi + oda planından türetilir.
+              ageBand: bands[i],
+              roomIndex: roomOf[i] ?? null,
+              idDocument: docNames[i],
             })),
           },
         },
@@ -197,7 +312,12 @@ export async function createPendingBooking(
       // Koltukları kilitle + cinsiyet yaz (her koltuk kendi cinsiyetiyle)
       for (const code of codes) {
         await tx.seat.updateMany({
-          where: { tourId: tour.id, code, status: { in: sellableStatuses } },
+          where: {
+            tourId: tour.id,
+            departureId: departure.id,
+            code,
+            status: { in: sellableStatuses },
+          },
           data: { status: "KILITLI", gender: genderByCode[code] },
         });
       }
@@ -215,12 +335,14 @@ export async function createPendingBooking(
     const active = await tx.booking.findMany({
       where: {
         tourId: tour.id,
+        departureId: departure.id,
         OR: [{ status: "ODENDI" }, { status: "BEKLIYOR" }],
       },
       select: { quantity: true },
     });
     const used = active.reduce((s, b) => s + b.quantity, 0);
-    const left = (tour.capacity ?? 0) - used;
+    // Kontenjan sefer bazlıdır; sefere özel değer yoksa turun kontenjanı geçerli.
+    const left = (departure.capacity ?? tour.capacity ?? 0) - used;
     if (qty > left)
       return {
         ok: false as const,
@@ -229,14 +351,16 @@ export async function createPendingBooking(
 
     const amount = priceBooking({
       unitPrice,
-      departureDate: tour.departureDate.toISOString(),
-      passengers: input.passengers,
+      departureDate: departureIso,
+      passengers: pricePassengers,
+      rooms: rooms.length ? rooms : undefined,
       accommodationType: input.accommodationType,
       singleSupplement: tour.singleSupplement,
     }).total;
     const booking = await tx.booking.create({
       data: {
         tourId: tour.id,
+        departureId: departure.id,
         status: "BEKLIYOR",
         totalAmount: amount,
         contactName: input.contactName,
@@ -244,11 +368,13 @@ export async function createPendingBooking(
         contactEmail: input.contactEmail,
         quantity: qty,
         boardingName,
-        accommodationType: input.accommodationType ?? null,
+        boardingPlaceId,
+        accommodationType: accommodationTypeOf(input.accommodationType, rooms),
+        rooms: rooms.length ? input.rooms ?? null : null,
         userId: input.userId ?? null,
         holdExpiresAt,
         passengers: {
-          create: input.passengers.map((p) => ({
+          create: input.passengers.map((p, i) => ({
             firstName: p.firstName,
             lastName: p.lastName,
             idNumber: p.idNumber || null,
@@ -256,6 +382,9 @@ export async function createPendingBooking(
             birthDate: p.birthDate ? new Date(p.birthDate) : null,
             nationality: p.nationality === "FOREIGN" ? "FOREIGN" : "TC",
             country: p.nationality === "FOREIGN" ? p.country || null : "Türkiye",
+            ageBand: bands[i],
+            roomIndex: roomOf[i] ?? null,
+            idDocument: docNames[i],
           })),
         },
       },
@@ -299,7 +428,11 @@ export async function markBookingPaid(
     ...(seatCodes.length
       ? [
           prisma.seat.updateMany({
-            where: { tourId: booking.tourId, code: { in: seatCodes } },
+            where: {
+              tourId: booking.tourId,
+              ...(booking.departureId ? { departureId: booking.departureId } : {}),
+              code: { in: seatCodes },
+            },
             data: { status: "SATILDI" },
           }),
         ]
@@ -314,6 +447,15 @@ export async function markBookingPaid(
     } catch (e) {
       console.error("[Onay bildirimi hatası]", e);
     }
+  }
+
+  // Çocuk/bebek varsa acenteye yaş onayı bildirimi — elden satışta da gider
+  // (görevli yaşı panelden onaylar). Best-effort.
+  try {
+    const { sendAgeVerificationRequest } = await import("@/lib/notifications");
+    await sendAgeVerificationRequest(bookingId);
+  } catch (e) {
+    console.error("[Yaş onayı bildirimi hatası]", e);
   }
 
   // Sadakat puanı (giriş yapmış müşteriye) — idempotent, best-effort, ödemeyi bloklamaz.
@@ -331,8 +473,13 @@ export async function markBookingPaid(
 export async function createManualPaidBooking(
   input: CreateBookingInput & { totalOverride?: number | null }
 ): Promise<CreateResult> {
-  // Acente elden satışı: online satışa kapatılmış (BLOKE) koltuklar da satılabilir.
-  const created = await createPendingBooking({ ...input, allowBlocked: true });
+  // Acente elden satışı: online satışa kapatılmış (BLOKE) koltuklar satılabilir ve
+  // tarihi geçmiş sefere de kayıt girilebilir (sonradan işlenen satışlar).
+  const created = await createPendingBooking({
+    ...input,
+    allowBlocked: true,
+    allowPast: true,
+  });
   if (!created.ok) return created;
 
   const paid = await markBookingPaid(created.bookingId, "NAKIT", {
@@ -385,7 +532,12 @@ export async function cancelBooking(bookingId: string): Promise<void> {
     ...(seatCodes.length
       ? [
           prisma.seat.updateMany({
-            where: { tourId: booking.tourId, code: { in: seatCodes }, status: "KILITLI" },
+            where: {
+              tourId: booking.tourId,
+              ...(booking.departureId ? { departureId: booking.departureId } : {}),
+              code: { in: seatCodes },
+              status: "KILITLI",
+            },
             data: { status: "BOS", gender: null },
           }),
         ]

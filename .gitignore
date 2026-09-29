@@ -52,3 +52,6 @@ dev.db
 
 # iyzico ham logo paketi — kullanılanlar public/payment/ altına kopyalandı
 /iyzico-logo-pack
+
+# Yaş doğrulama kimlik belgeleri (KVKK — asla depoya girmemeli)
+.private/
