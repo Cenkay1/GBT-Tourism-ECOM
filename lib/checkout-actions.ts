@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/db";
-import { createPendingBooking, PassengerInput } from "@/lib/booking";
+import { cancelBooking, createPendingBooking, PassengerInput } from "@/lib/booking";
 import { startPayment } from "@/lib/payment";
 import { getCurrentUser } from "@/lib/session";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
@@ -86,16 +86,36 @@ export async function submitCheckout(fd: FormData) {
   const host = h.get("host") ?? "localhost:3000";
   const baseUrl = `${proto}://${host}`;
 
-  const { redirectUrl } = await startPayment({
-    bookingId: result.bookingId,
-    amount: result.amount,
-    currency: tour?.currency ?? "TRY",
-    contactName: s(fd, "contactName"),
-    contactEmail: s(fd, "contactEmail"),
-    contactPhone: s(fd, "contactPhone"),
-    tourTitle: tour?.title ?? "Tur",
-    baseUrl,
-  });
+  let redirectUrl: string;
+  try {
+    ({ redirectUrl } = await startPayment({
+      bookingId: result.bookingId,
+      amount: result.amount,
+      currency: tour?.currency ?? "TRY",
+      contactName: s(fd, "contactName"),
+      contactEmail: s(fd, "contactEmail"),
+      contactPhone: s(fd, "contactPhone"),
+      tourTitle: tour?.title ?? "Tur",
+      baseUrl,
+    }));
+  } catch (error) {
+    console.error("[checkout: iyzico ödeme başlatılamadı]", {
+      bookingId: result.bookingId,
+      error,
+    });
+    try {
+      await cancelBooking(result.bookingId);
+    } catch (cleanupError) {
+      console.error("[checkout: rezervasyon/koltuk temizleme başarısız]", {
+        bookingId: result.bookingId,
+        error: cleanupError,
+      });
+    }
+    const message = "Ödeme başlatılamadı. Koltuk kilidi kaldırıldı; lütfen tekrar deneyin.";
+    redirect(
+      `${tour ? `/turlar/${tour.slug}` : "/turlar"}?hata=${encodeURIComponent(message)}`
+    );
+  }
 
   redirect(redirectUrl);
 }
