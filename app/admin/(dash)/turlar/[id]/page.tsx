@@ -37,10 +37,13 @@ function parseArr(v: string): string {
 
 export default async function EditTourPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ hata?: string }>;
 }) {
   const { id } = await params;
+  const { hata } = await searchParams;
   const [t, amenities, buses] = await Promise.all([
     prisma.tour.findUnique({
       where: { id },
@@ -114,6 +117,9 @@ export default async function EditTourPage({
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="mb-6 text-2xl font-bold text-brand">Turu Düzenle</h1>
+      {hata && (
+        <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{hata}</p>
+      )}
       <TourForm
         action={action}
         initial={initial}

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { sendSms, sendEmail } from "@/lib/notify";
 import { formatPrice } from "@/lib/shared";
 import { COMPANY as COMPANY_INFO } from "@/lib/company";
+import { emailShell } from "@/lib/email-layout";
 
 const COMPANY = "Gözdem Burak Turizm";
 
@@ -69,6 +70,15 @@ function seatText(b: BookingWithTour): string {
 
 function ref(b: BookingWithTour): string {
   return b.id.slice(-8).toUpperCase();
+}
+
+// Görevlinin yazdığı serbest metin HTML gövdesine gömülüyor; işaretleri kaçır.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 // --- Onay (satış anında) ---
@@ -312,4 +322,57 @@ function reminderEmailHtml(b: BookingWithTour): string {
       b
     )}<p style="font-size:14px;color:#475569;margin-top:12px">İyi yolculuklar dileriz.</p>`
   );
+}
+
+// --- İptal bildirimi ---
+//
+// Görevli panelden rezervasyonu iptal edince müşteriye gider. Gönderen adresi
+// .env'deki SMTP_FROM'dur (info@gozdemburakturizm.com olarak ayarlanmalı).
+// SMS gönderilmez — iptal gerekçesi uzun metin, e-posta için uygun.
+export async function sendBookingCancellation(
+  bookingId: string,
+  reason: string,
+  opts?: { refundAmount?: number }
+): Promise<void> {
+  const b = (await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      tour: { include: { bus: true } },
+      departure: { include: { bus: true } },
+      boardingPlace: { select: { name: true, boardingTime: true } },
+      passengers: true,
+    },
+  })) as BookingWithTour | null;
+  if (!b) return;
+
+  const passengerList = b.passengers.length
+    ? `<p style="font-size:14px;color:#475569;margin:4px 0"><strong>Yolcular:</strong> ${seatText(b)}</p>`
+    : "";
+
+  // Iade satırı yalnız iade tutarı sıfırdan büyükse gösterilir.
+  // Sıfır veya boş değerler gereksiz bir bildirim oluşturmaması için filtrelenir.
+  const refundLine =
+    opts?.refundAmount != null && opts.refundAmount > 0
+      ? `<p style="font-size:14px;color:#475569;margin:12px 0 0"><strong>İade tutarı:</strong> ${formatPrice(
+          opts.refundAmount,
+          b.tour.currency
+        )}. Tutar bankanıza bağlı olarak 3-7 iş günü içinde kartınıza yansır.</p>`
+      : "";
+
+  const html = emailShell(
+    "Rezervasyonunuz iptal edildi",
+    `<p style="font-size:14px;color:#475569">Sayın ${b.contactName}, aşağıdaki rezervasyonunuz iptal edilmiştir.</p>
+     <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Rezervasyon No:</strong> ${ref(b)}</p>
+       <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Tur:</strong> ${b.tour.title}</p>
+       <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Kalkış:</strong> ${fmtDateTime(depDate(b))}</p>
+       ${passengerList}
+     </div>
+     <p style="font-size:14px;color:#475569;margin:0 0 4px"><strong>İptal nedeni:</strong></p>
+     <p style="font-size:14px;color:#475569;white-space:pre-wrap;margin:0">${escapeHtml(reason)}</p>
+     ${refundLine}
+     <p style="font-size:14px;color:#475569;margin-top:20px">Sorularınız için bize ${COMPANY_INFO.phones[0]} numarasından veya ${COMPANY_INFO.emails[0]} adresinden ulaşabilirsiniz.</p>`
+  );
+
+  await sendEmail(b.contactEmail, `${COMPANY} — Rezervasyon İptali (${ref(b)})`, html);
 }

@@ -11,6 +11,8 @@ import {
 } from "@/lib/admin-actions";
 import { idDocumentViewUrl } from "@/lib/id-documents";
 import DeleteButton from "@/components/admin/DeleteButton";
+import RefundButton from "@/components/admin/RefundButton";
+import CancelBookingButton from "@/components/admin/CancelBookingButton";
 import {
   UsersIcon,
   PhoneIcon,
@@ -35,6 +37,20 @@ function roomsSummary(raw: string): string {
   }`;
 }
 
+const paymentStatusLabel: Record<string, string> = {
+  BASLATILDI: "Başlatıldı",
+  BASARILI: "Başarılı",
+  BASARISIZ: "Başarısız",
+  IADE: "İade edildi",
+};
+
+const paymentStatusStyle: Record<string, string> = {
+  BASLATILDI: "bg-amber-50 text-amber-700",
+  BASARILI: "bg-emerald-50 text-emerald-700",
+  BASARISIZ: "bg-red-50 text-red-600",
+  IADE: "bg-slate-100 text-slate-600",
+};
+
 const statusLabel: Record<string, string> = {
   ODENDI: "Ödendi",
   BEKLIYOR: "Bekliyor",
@@ -55,9 +71,24 @@ export default async function BookingDetail({
       departure: { include: { bus: true } },
       boardingPlace: true,
       passengers: true,
+      payments: { orderBy: { createdAt: "desc" } },
     },
   });
   if (!b) notFound();
+
+  // iyzico'dan iade edilebilecek ödeme: başarılı, paymentId'si olan ve henüz
+  // iade edilmemiş son kayıt. Elden satışta (NAKIT) böyle bir kayıt olmaz.
+  const refundablePayment = b.payments.find(
+    (p) => p.status === "BASARILI" && p.paymentId && !p.refundedAt
+  );
+
+  // Para iade edilmiş ama rezervasyon iptale alınmamış: koltuklar hâlâ dolu,
+  // müşteriye bildirim gitmemiş. Bu uyarı veritabanı durumundan türetilir —
+  // bileşen durumundan değil — çünkü iade sonrası RefundButton ağaçtan çıkıyor
+  // ve kendi uyarısını ekrana basamadan kayboluyor. Elle iptal edilince
+  // (status IPTAL) kendiliğinden kaybolur.
+  const iadeliAmaIptalsiz =
+    b.status !== "IPTAL" && b.payments.some((p) => p.status === "IADE");
 
   // Yaş onayı bekleyen çocuk/bebek yolcular.
   const pendingAge = b.passengers.filter(
@@ -178,6 +209,86 @@ export default async function BookingDetail({
               </div>
             )}
           </section>
+
+          {/* iyzico ödeme kayıtları — mutabakat ve uyuşmazlık takibi için.
+              Kart verisi tutulmaz; yalnızca iyzico'nun döndürdüğü maskeli özet. */}
+          {b.payments.length > 0 && (
+            <section className="rounded-2xl bg-white p-6 shadow-sm">
+              <h2 className="mb-4 font-bold text-brand">Ödeme Kayıtları</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead className="text-left text-xs uppercase text-slate-400">
+                    <tr>
+                      <th className="pb-2">Tarih</th>
+                      <th className="pb-2">Durum</th>
+                      <th className="pb-2">Tutar</th>
+                      <th className="pb-2">Kart</th>
+                      <th className="pb-2">iyzico No</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {b.payments.map((p) => (
+                      <tr key={p.id}>
+                        <td className="py-2.5 text-slate-600">
+                          {p.createdAt.toLocaleString("tr-TR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </td>
+                        <td className="py-2.5">
+                          <span
+                            className={`rounded-md px-2 py-0.5 text-xs font-semibold ${
+                              paymentStatusStyle[p.status] ?? "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {paymentStatusLabel[p.status] ?? p.status}
+                          </span>
+                          {p.errorMessage && (
+                            <span className="mt-1 block text-xs text-red-500">
+                              {p.errorMessage}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-slate-600">
+                          {formatPrice(p.paidAmount ?? p.amount, p.currency)}
+                          {p.installment != null && p.installment > 1 && (
+                            <span className="block text-xs text-slate-400">
+                              {p.installment} taksit
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-slate-600">
+                          {p.cardLastFour ? (
+                            <>
+                              **** {p.cardLastFour}
+                              {p.cardFamily && (
+                                <span className="block text-xs text-slate-400">
+                                  {p.cardFamily}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="py-2.5 font-mono text-xs text-slate-500">
+                          {p.paymentId ?? "—"}
+                          {p.refundedAt && (
+                            <span className="block font-sans text-xs text-slate-400">
+                              İade: {p.refundedAt.toLocaleDateString("tr-TR")}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
         </div>
 
         {/* Özet + işlemler */}
@@ -220,14 +331,35 @@ export default async function BookingDetail({
             </div>
           </div>
 
+          {iadeliAmaIptalsiz && (
+            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              ÖNEMLİ: Bu rezervasyonun ödemesi iade edilmiş ama rezervasyon
+              iptale alınmamış. Koltuklar hâlâ dolu görünüyor ve müşteriye
+              iptal bildirimi gitmedi. Aşağıdaki &quot;İptal et&quot; düğmesiyle
+              rezervasyonu elle iptal edin.
+            </div>
+          )}
+
           <div className="rounded-2xl bg-white p-6 shadow-sm">
             <h2 className="mb-3 font-bold text-brand">İşlemler</h2>
             <div className="space-y-2">
-              {b.status !== "ODENDI" && (
+              {/* İptal edilmiş bir rezervasyon "ödendi" yapılamaz: setBookingStatus
+                  yalnız durum kolonunu yazar, koltuğa dokunmaz — koltuk IPTAL'de
+                  zaten BOS'tur ve ikinci bir müşteriye satılmış olabilir. */}
+              {b.status !== "ODENDI" && b.status !== "IPTAL" && (
                 <StatusForm id={b.id} status="ODENDI" label="Ödendi olarak işaretle" primary />
               )}
-              {b.status !== "IPTAL" && (
-                <StatusForm id={b.id} status="IPTAL" label="İptal et" />
+              {b.status !== "IPTAL" && <CancelBookingButton bookingId={b.id} />}
+              {/* Online tahsil edilmiş ve henüz iade edilmemiş ödeme varsa
+                  parayı iyzico üzerinden geri verebiliriz. */}
+              {b.status === "ODENDI" && refundablePayment && (
+                <RefundButton
+                  bookingId={b.id}
+                  amountLabel={formatPrice(
+                    refundablePayment.paidAmount ?? refundablePayment.amount,
+                    refundablePayment.currency
+                  )}
+                />
               )}
               <DeleteButton
                 action={async () => {

@@ -153,6 +153,7 @@ model Booking {
   createdAt         DateTime       @default(now())
 
   passengers Passenger[]
+  payments   Payment[]
 }
 
 model Passenger {
@@ -256,7 +257,7 @@ model PointsLedger {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookingId String? // kaynağı olan rezervasyon (opsiyonel)
   delta     Int // +kazanım / -harcama
-  reason    String // KAZANIM | HOSGELDIN | DUZELTME
+  reason    String // KAZANIM | HOSGELDIN | DUZELTME | IPTAL
   note      String   @default("")
   createdAt DateTime @default(now())
 }
@@ -280,4 +281,34 @@ model Review {
   active    Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
+}
+
+// iyzico ödeme denemesi kaydı. Her ödeme başlatma bir satır açar, callback
+// aynı satırı günceller. Amacı mutabakat ve uyuşmazlık takibi: "bu rezervasyon
+// için iyzico ne dedi?" sorusunun cevabı burada durur.
+// Kart verisi TUTULMAZ — yalnızca iyzico'nun döndürdüğü maskeli özet
+// (kart ailesi, son 4 hane) saklanır.
+model Payment {
+  id            String  @id @default(cuid())
+  bookingId     String
+  booking       Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  provider      String  @default("IYZICO")
+  token         String? @unique // checkout form token'ı (callback eşlemesi)
+  paymentId     String? // iyzico ödeme kimliği (iade için gerekli)
+  status        String  @default("BASLATILDI") // BASLATILDI | BASARILI | BASARISIZ | IADE
+  amount        Int // bizim beklediğimiz tutar (Booking.totalAmount kopyası)
+  paidAmount    Int? // iyzico'nun tahsil ettiği tutar (taksitte komisyonla farklı olabilir)
+  currency      String  @default("TRY")
+  installment   Int? // taksit sayısı (1 = tek çekim)
+  cardFamily    String? // örn. "Bonus"
+  cardLastFour  String? // son 4 hane — iyzico'dan geldiği gibi
+  fraudStatus   Int? // 1 onaylı | 0 incelemede | -1 reddedildi
+  errorCode     String?
+  errorMessage  String?
+  refundedAt    DateTime?
+  refundRef     String? // iyzico iade referansı
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([bookingId])
 }

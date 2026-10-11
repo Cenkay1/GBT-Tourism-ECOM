@@ -513,6 +513,10 @@ export async function createManualPaidBooking(
 }
 
 // Ödeme iptal/başarısız: koltukları serbest bırak, rezervasyonu iptal et.
+// DİKKAT: bu fonksiyon YALNIZ ödeme akışı iptali içindir — sadece KILITLI
+// koltukları açar ve ödenmiş (SATILDI) rezervasyona dokunmaz. Görevli
+// iptali için cancelBookingByAdmin kullanılmalı; aksi halde ödenmiş koltuk
+// sonsuza dek dolu kalır (düzeltilen hata geri gelir).
 export async function cancelBooking(bookingId: string): Promise<void> {
   const booking = await prisma.booking.findUnique({
     where: { id: bookingId },
@@ -543,4 +547,82 @@ export async function cancelBooking(bookingId: string): Promise<void> {
         ]
       : []),
   ]);
+}
+
+// Görevli tarafından iptal: koltukları DURUMU NE OLURSA OLSUN serbest bırakır,
+// rezervasyonu IPTAL'e çeker, sadakat puanını geri alır ve müşteriye bildirir.
+//
+// cancelBooking()'den farkı: o yalnız KILITLI koltukları açıyor ve ödenmiş
+// rezervasyona hiç dokunmuyor (ödeme akışının iptali için doğru davranış).
+// Burada ödenmiş rezervasyonun SATILDI koltukları da boşa alınmalı — yoksa
+// koltuk sonsuza kadar dolu kalır.
+export async function cancelBookingByAdmin(
+  bookingId: string,
+  reason: string,
+  opts?: { refundAmount?: number; notify?: boolean }
+): Promise<{ ok: boolean; error?: string }> {
+  const trimmed = reason.trim();
+  if (!trimmed) return { ok: false, error: "İptal nedeni yazılmalı." };
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { passengers: true },
+  });
+  if (!booking) return { ok: false, error: "Rezervasyon bulunamadı." };
+
+  // Erken çıkış (idempotent kontrolü) kasıtlı olarak yan etkilerden SONRAYA
+  // alındı. Eskiden "zaten IPTAL" durumunda fonksiyon burada dönüyordu; ama
+  // transaction (koltuk boşaltma) tamamlanıp süreç/istek yan etkilerden ÖNCE
+  // kesilirse (çökme, e-posta sunucusu patlaması vb.) ikinci deneme bu erken
+  // çıkışa takılıp puan geri alma + e-postayı SONSUZA DEK atlıyordu — ve bunu
+  // düzeltmenin hiçbir yolu kalmıyordu. Şimdi: rezervasyon zaten IPTAL ise
+  // transaction'ı (koltuklar zaten boş, tekrar yazmaya gerek yok) atlıyoruz
+  // ama yan etkileri her zaman çalıştırıyoruz — her ikisi de kendi içinde
+  // idempotent (puan: loyaltyAwardedAt koruması; e-posta: tekrar gitmesi
+  // "hiç gitmemiş" olmaktan daha güvenli).
+  if (booking.status !== "IPTAL") {
+    const seatCodes = booking.passengers
+      .map((p) => p.seatCode)
+      .filter((c): c is string => !!c);
+
+    await prisma.$transaction([
+      prisma.booking.update({ where: { id: bookingId }, data: { status: "IPTAL" } }),
+      ...(seatCodes.length
+        ? [
+            prisma.seat.updateMany({
+              // Yalnız bu rezervasyonun seferindeki koltuklar; aynı kod başka
+              // seferde başka müşteride olabilir. departureId null ise
+              // koşullu yayılım YERİNE doğrudan null eşitliği kullanılır:
+              // aksi halde turun TÜM seferlerindeki aynı kodlu koltuklar
+              // yakalanır — başka müşterinin koltuğuna asla dokunulmamalı.
+              where: {
+                tourId: booking.tourId,
+                departureId: booking.departureId,
+                code: { in: seatCodes },
+              },
+              data: { status: "BOS", gender: null },
+            }),
+          ]
+        : []),
+    ]);
+  }
+
+  // Puan geri alımı — best-effort, iptali bloklamaz.
+  try {
+    const { revokeLoyaltyForBooking } = await import("@/lib/loyalty");
+    await revokeLoyaltyForBooking(bookingId);
+  } catch (e) {
+    console.error("[Sadakat puanı geri alma hatası]", e);
+  }
+
+  if (opts?.notify !== false) {
+    try {
+      const { sendBookingCancellation } = await import("@/lib/notifications");
+      await sendBookingCancellation(bookingId, trimmed, opts?.refundAmount != null ? { refundAmount: opts.refundAmount } : undefined);
+    } catch (e) {
+      console.error("[İptal bildirimi hatası]", e);
+    }
+  }
+
+  return { ok: true };
 }

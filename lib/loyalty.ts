@@ -154,3 +154,75 @@ export async function linkGuestBookings(userId: string, email: string): Promise<
     if (c.status === "ODENDI") await awardLoyaltyForBooking(c.id);
   }
 }
+
+// Rezervasyon iptal/iade edildiğinde yazılmış sadakat puanını geri alır.
+// İdempotent: loyaltyAwardedAt null ise hiçbir şey yapmaz.
+//
+// Geri alınacak miktar Booking.totalAmount'tan DEĞİL, ledger'daki o
+// rezervasyona ait KAZANIM satırlarının toplamından okunur — tutar sonradan
+// elle değiştirilmiş olabilir ve o zaman bakiye bozulurdu.
+//
+// Defter kuralı: PointsLedger.delta toplamı == User.points. Bakiye eksiye
+// düşmesin diye sıfırda kesiliyor (clamp); bu durumda deftere YAZILAN satır
+// da tam kazanım tutarı değil, bakiyeye GERÇEKTEN uygulanan fark
+// (current.points - nextPoints) olmalı — aksi halde defter toplamı bakiyeyi
+// yansıtmaz hâle gelir.
+export async function revokeLoyaltyForBooking(bookingId: string): Promise<void> {
+  const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
+  if (!booking) return;
+  if (!booking.userId) return; // misafir rezervasyon → puan yazılmamıştı
+  if (!booking.loyaltyAwardedAt) return; // zaten geri alınmış ya da hiç yazılmamış
+
+  const userId = booking.userId;
+
+  await prisma.$transaction(async (tx) => {
+    // Yarış durumuna karşı: yalnızca hâlâ işaretliyse geri al.
+    const res = await tx.booking.updateMany({
+      where: { id: bookingId, loyaltyAwardedAt: { not: null } },
+      data: { loyaltyAwardedAt: null },
+    });
+    if (res.count === 0) return; // başka bir işlem geri almış
+
+    const earned = await tx.pointsLedger.aggregate({
+      where: { bookingId, reason: "KAZANIM" },
+      _sum: { delta: true },
+    });
+    const points = earned._sum.delta ?? 0;
+    if (points <= 0) return; // yazılmış kazanım yok
+
+    const current = await tx.user.findUnique({ where: { id: userId } });
+    if (!current) return;
+
+    // Bakiye eksiye düşmesin: puan arada harcanmış olabilir.
+    const nextPoints = Math.max(0, current.points - points);
+    const nextLifetime = Math.max(0, current.lifetimePoints - points);
+
+    await tx.user.update({
+      where: { id: userId },
+      data: {
+        points: nextPoints,
+        lifetimePoints: nextLifetime,
+        tier: tierForPoints(nextLifetime),
+      },
+    });
+
+    // Deftere, bakiyeden GERÇEKTEN düşülen miktar yazılır — tam kazanım
+    // tutarı değil. Normalde (bakiye >= points) ikisi eşittir; bakiye arada
+    // azalmışsa (örn. ileride eklenecek puan harcama özelliği) uygulanan
+    // miktar daha az olur ve defter toplamı == bakiye kuralı bu şekilde korunur.
+    const applied = current.points - nextPoints;
+    const isPartial = applied < points;
+
+    await tx.pointsLedger.create({
+      data: {
+        userId,
+        bookingId,
+        delta: -applied,
+        reason: "IPTAL",
+        note: isPartial
+          ? `Rezervasyon ${bookingId.slice(-8).toUpperCase()} iptal edildi (kısmi geri alım: bakiye kazanımdan az)`
+          : `Rezervasyon ${bookingId.slice(-8).toUpperCase()} iptal edildi`,
+      },
+    });
+  });
+}

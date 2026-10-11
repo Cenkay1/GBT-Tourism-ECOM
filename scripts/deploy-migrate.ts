@@ -9,7 +9,7 @@
 //   DATABASE_URL="file:/var/www/gbt/data/prod.db" npx tsx scripts/deploy-migrate.ts
 //
 // Yaptıkları:
-//   1. Bus ve TourDeparture tablolarını oluşturur (yoksa)
+//   1. Bus, TourDeparture ve Payment tablolarını oluşturur (yoksa)
 //   2. Tour/TourPlace/Booking/Passenger/Seat tablolarına eksik kolonları ekler
 //   3. Her tur için bir sefer (TourDeparture) açıp koltukları ve rezervasyonları
 //      ona bağlar — tek seferli turlar davranışını korur
@@ -20,6 +20,7 @@
 // zararsızdır; istenirse sonradan elle düşürülebilir.
 import { existsSync, statSync } from "node:fs";
 import { prisma } from "../lib/db";
+import { repairSeatIndexes, repairSeatlessDepartures } from "../lib/seat-index-repair";
 
 type ColumnInfo = { name: string };
 
@@ -148,6 +149,43 @@ async function main() {
     console.log("  + TourDeparture tablosu");
   } else {
     console.log("  = TourDeparture tablosu zaten var");
+  }
+
+  // iyzico ödeme kayıt tablosu.
+  if (!(await tableExists("Payment"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "Payment" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "bookingId" TEXT NOT NULL,
+        "provider" TEXT NOT NULL DEFAULT 'IYZICO',
+        "token" TEXT,
+        "paymentId" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'BASLATILDI',
+        "amount" INTEGER NOT NULL,
+        "paidAmount" INTEGER,
+        "currency" TEXT NOT NULL DEFAULT 'TRY',
+        "installment" INTEGER,
+        "cardFamily" TEXT,
+        "cardLastFour" TEXT,
+        "fraudStatus" INTEGER,
+        "errorCode" TEXT,
+        "errorMessage" TEXT,
+        "refundedAt" DATETIME,
+        "refundRef" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Payment_bookingId_fkey" FOREIGN KEY ("bookingId")
+          REFERENCES "Booking" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX "Payment_token_key" ON "Payment"("token")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX "Payment_bookingId_idx" ON "Payment"("bookingId")`
+    );
+    console.log("  + Payment tablosu");
+  } else {
+    console.log("  = Payment tablosu zaten var");
   }
 
   console.log("== 2. Kolonlar ==");
@@ -303,25 +341,52 @@ async function main() {
   }
 
   // Koltuk benzersizliği artık (departureId, code) üzerinde. Veriler sefere
-  // BAĞLANDIKTAN SONRA eklenir — önce eklenirse bağlama sırasında çakışır.
+  // BAĞLANDIKTAN SONRA onarılır — önce yapılırsa bağlama sırasında çakışır.
+  //
+  // ÖNEMLİ: eski (tourId, code) indeksi düşürülmezse bir tur aynı koltuk kodunu
+  // yalnız bir kez tutabilir ve ikinci sefer eklenince tur kaydı 500 döner.
   console.log("== 6. İndeksler ==");
-  const idx = await prisma.$queryRawUnsafe<{ name: string }[]>(
-    `SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='Seat'`
-  );
-  if (idx.some((i) => i.name === "Seat_departureId_code_key")) {
-    console.log("  = Seat(departureId, code) indeksi zaten var");
+  const indexResult = await repairSeatIndexes(prisma);
+  for (const name of indexResult.dropped) {
+    console.log(`  - eski benzersiz indeks düşürüldü: ${name}`);
+  }
+  if (indexResult.created) {
+    console.log("  + Seat(departureId, code) benzersiz indeks");
   } else {
-    try {
-      await prisma.$executeRawUnsafe(
-        `CREATE UNIQUE INDEX "Seat_departureId_code_key" ON "Seat"("departureId", "code")`
-      );
-      console.log("  + Seat(departureId, code) benzersiz indeks");
-    } catch (e) {
-      console.log(
-        "  ! Seat indeksi eklenemedi (yinelenen koltuk olabilir):",
-        (e as Error).message.split("\n")[0]
-      );
+    console.log("  = Seat(departureId, code) indeksi zaten var");
+  }
+  if (indexResult.dropped.length === 0 && !indexResult.created) {
+    console.log("  = indeksler zaten doğru");
+  }
+
+  console.log("== 7. Koltuksuz seferler ==");
+  const seatless = await repairSeatlessDepartures(prisma);
+  const failedCount = seatless.failed.length;
+  const skippedCount = seatless.skipped.length;
+  if (
+    seatless.repaired.length === 0 &&
+    seatless.failed.length === 0 &&
+    seatless.skipped.length === 0
+  ) {
+    // Bu satır YALNIZCA üç kova da boşken yazılır — aksi halde atlanan veya
+    // başarısız bir sefer varken görevliye yanlışlıkla "sorun yok" denir.
+    console.log("  = koltuksuz sefer yok");
+  } else {
+    for (const r of seatless.repaired) {
+      console.log(`  + ${r.departureId}: ${r.seats} koltuk üretildi`);
     }
+  }
+  if (seatless.skipped.length > 0) {
+    for (const r of seatless.skipped) {
+      console.log(`  ! ${r.departureId}: atlandı — ${r.reason}`);
+    }
+    console.log(`  ! ${seatless.skipped.length} sefer düzeni çözülemediği için atlandı — elle incelenmeli`);
+  }
+  if (seatless.failed.length > 0) {
+    for (const r of seatless.failed) {
+      console.log(`  ! ${r.departureId}: koltuk üretilemedi — ${r.error}`);
+    }
+    console.log(`  ! ${seatless.failed.length} sefer onarılamadı — elle incelenmeli`);
   }
 
   console.log("== Özet ==");
@@ -337,7 +402,18 @@ async function main() {
     "  seferi olmayan rezervasyon:",
     await prisma.booking.count({ where: { departureId: null } })
   );
-  console.log("\nTamamlandı ✅");
+  if (failedCount === 0 && skippedCount === 0) {
+    console.log("\nTamamlandı ✅");
+  } else {
+    const parts: string[] = [];
+    if (failedCount > 0) parts.push(`${failedCount} sefer onarılamadı`);
+    if (skippedCount > 0) parts.push(`${skippedCount} sefer düzeni çözülemediği için atlandı`);
+    console.log(
+      `\nTamamlandı — UYARI: ${parts.join(", ")} ⚠️\n` +
+        "  Sorunlu seferler yukarıdaki '!' ile işaretlenen satırlarda listelenmiştir.\n" +
+        "  koltuklar henüz o seferlere yazılmadığı için script tekrar çalıştırılabilir."
+    );
+  }
 }
 
 main()

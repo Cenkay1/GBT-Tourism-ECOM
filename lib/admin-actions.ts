@@ -6,7 +6,9 @@ import { prisma } from "@/lib/db";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { getSessionEmail } from "@/lib/auth";
 import { VEHICLES, VehicleType, seatCodes, isValidClockTime } from "@/lib/shared";
-import { createManualPaidBooking } from "@/lib/booking";
+import { createManualPaidBooking, cancelBookingByAdmin } from "@/lib/booking";
+import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
+import type { FormState } from "@/lib/form-state";
 
 async function requireAdmin() {
   const email = await getSessionEmail();
@@ -523,56 +525,77 @@ function seatConfigOf(data: {
 
 export async function createTour(fd: FormData) {
   await requireAdmin();
-  const data = await tourDataFromForm(fd);
-  const slug = await uniqueSlug(data.title);
-  const tour = await prisma.tour.create({ data: { ...data, slug } });
 
-  // Koltuklar sefer bazlı üretilir; saveDepartures her yeni sefer için üretir.
-  await saveDepartures(tour.id, str(fd, "departures"), seatConfigOf(data));
-  await savePlaces(tour.id, str(fd, "places"));
+  // Veritabanı işi ayrı: redirect() kendi sinyalini throw ettiği için ASLA
+  // try bloğunun içinde çağrılmamalı, yoksa başarılı kayıt hataya düşer.
+  let tourId: string;
+  try {
+    const data = await tourDataFromForm(fd);
+    const slug = await uniqueSlug(data.title);
+    const tour = await prisma.tour.create({ data: { ...data, slug } });
+    // Koltuklar sefer bazlı üretilir; saveDepartures her yeni sefer için üretir.
+    await saveDepartures(tour.id, str(fd, "departures"), seatConfigOf(data));
+    await savePlaces(tour.id, str(fd, "places"));
+    tourId = tour.id;
+  } catch (e) {
+    const ref = newErrorRef();
+    console.error("[tur oluşturma hatası]", ref, e);
+    redirect(`/admin/turlar/yeni?hata=${encodeURIComponent(tourSaveErrorMessage(e, ref))}`);
+  }
+
   revalidatePath("/");
   revalidatePath("/admin/turlar");
+  revalidatePath(`/admin/turlar/${tourId}`);
   redirect("/admin/turlar");
 }
 
 export async function updateTour(id: string, fd: FormData) {
   await requireAdmin();
-  const data = await tourDataFromForm(fd);
-  const slug = await uniqueSlug(data.title, id);
 
-  const existing = await prisma.tour.findUnique({
-    where: { id },
-    include: { seats: true },
-  });
+  try {
+    const data = await tourDataFromForm(fd);
+    const slug = await uniqueSlug(data.title, id);
 
-  await prisma.tour.update({ where: { id }, data: { ...data, slug } });
-  await saveDepartures(id, str(fd, "departures"), seatConfigOf(data));
+    const existing = await prisma.tour.findUnique({
+      where: { id },
+      include: { seats: true },
+    });
 
-  // Araç tipi/sıra değiştiyse ve hiçbir seferde satılmış/kilitli koltuk yoksa
-  // tüm seferlerin koltuklarını yeniden üret.
-  if (data.bookingType === "KOLTUK" && data.seatRows) {
-    const hasActive = existing?.seats.some((s) => s.status !== "BOS");
-    const layoutChanged =
-      existing?.vehicleType !== data.vehicleType ||
-      existing?.seatRows !== data.seatRows ||
-      existing?.backRowFull !== data.backRowFull;
-    if (!hasActive && layoutChanged) {
-      await prisma.seat.deleteMany({ where: { tourId: id } });
-      const departures = await prisma.tourDeparture.findMany({ where: { tourId: id } });
-      for (const d of departures) {
-        await generateSeats(
-          id,
-          d.id,
-          data.vehicleType ?? "OTOBUS",
-          data.seatRows,
-          data.backRowFull ?? false
-        );
+    await prisma.tour.update({ where: { id }, data: { ...data, slug } });
+    await saveDepartures(id, str(fd, "departures"), seatConfigOf(data));
+
+    // Araç tipi/sıra değiştiyse ve hiçbir seferde satılmış/kilitli koltuk yoksa
+    // tüm seferlerin koltuklarını yeniden üret.
+    if (data.bookingType === "KOLTUK" && data.seatRows) {
+      const hasActive = existing?.seats.some((s) => s.status !== "BOS");
+      const layoutChanged =
+        existing?.vehicleType !== data.vehicleType ||
+        existing?.seatRows !== data.seatRows ||
+        existing?.backRowFull !== data.backRowFull;
+      if (!hasActive && layoutChanged) {
+        await prisma.seat.deleteMany({ where: { tourId: id } });
+        const departures = await prisma.tourDeparture.findMany({ where: { tourId: id } });
+        for (const d of departures) {
+          await generateSeats(
+            id,
+            d.id,
+            data.vehicleType ?? "OTOBUS",
+            data.seatRows,
+            data.backRowFull ?? false
+          );
+        }
       }
     }
+    await savePlaces(id, str(fd, "places"));
+  } catch (e) {
+    const ref = newErrorRef();
+    console.error("[tur güncelleme hatası]", ref, e);
+    redirect(`/admin/turlar/${id}?hata=${encodeURIComponent(tourSaveErrorMessage(e, ref))}`);
   }
-  await savePlaces(id, str(fd, "places"));
+
   revalidatePath("/");
   revalidatePath("/admin/turlar");
+  revalidatePath(`/admin/turlar/${id}`);
   redirect("/admin/turlar");
 }
 
@@ -901,11 +924,60 @@ export async function deletePassengerDocument(passengerId: string) {
   revalidatePath(`/admin/rezervasyonlar/${passenger.bookingId}`);
 }
 
+// Durum değişikliği. İPTAL burada ELE ALINMAZ: iptal koltuk boşaltma, puan
+// geri alımı ve müşteri bildirimi gerektirdiği için cancelBookingAction'a
+// aittir. Buraya "IPTAL" gelirse sessizce yanlış iş yapmak yerine reddediyoruz.
 export async function setBookingStatus(id: string, status: string) {
   await requireAdmin();
+  if (status === "IPTAL") {
+    throw new Error(
+      "İptal için cancelBookingAction kullanılmalı (koltuk boşaltma ve bildirim gerekiyor)."
+    );
+  }
+  // Hedef durum ne olursa olsun: mevcut durumu IPTAL olan bir rezervasyon
+  // buradan değiştirilemez. İptalde koltuk zaten BOS'a alınmıştır — kaydı
+  // "ödendi" gibi bir duruma geri çekmek koltuğun ikinci kez satılmış
+  // olabileceği gerçeğini gizler (otobüste iki yolcu tek koltuk). İptal
+  // edilmiş bir rezervasyon yeniden aktifleştirilemez; gerekirse yeni bir
+  // rezervasyon açılmalı.
+  const current = await prisma.booking.findUnique({
+    where: { id },
+    select: { status: true },
+  });
+  if (current?.status === "IPTAL") {
+    throw new Error(
+      "Bu rezervasyon iptal edilmiş; durumu buradan değiştirilemez. İptal edilmiş rezervasyon yeniden aktifleştirilemez — gerekirse müşteri için yeni bir rezervasyon açın."
+    );
+  }
   await prisma.booking.update({ where: { id }, data: { status } });
   revalidatePath("/admin/rezervasyonlar");
   revalidatePath(`/admin/rezervasyonlar/${id}`);
+}
+
+// Görevli iptali: koltuğu serbest bırakır, puanı geri alır, müşteriye
+// gerekçeli iptal e-postası gönderir. useActionState imzası.
+export async function cancelBookingAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+
+  const bookingId = String(fd.get("bookingId") ?? "").trim();
+  const reason = String(fd.get("reason") ?? "").trim();
+  if (!bookingId) return { ok: false, error: "Rezervasyon belirtilmedi." };
+  if (!reason) return { ok: false, error: "İptal nedeni yazılmalı — bu metin müşteriye gidiyor." };
+
+  const res = await cancelBookingByAdmin(bookingId, reason);
+  if (!res.ok) return { ok: false, error: res.error ?? "İptal edilemedi." };
+
+  revalidatePath("/admin/rezervasyonlar");
+  revalidatePath(`/admin/rezervasyonlar/${bookingId}`);
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    message: "Rezervasyon iptal edildi, koltuklar serbest bırakıldı ve müşteriye bilgi e-postası gönderildi.",
+  };
 }
 
 export async function deleteBooking(id: string) {
