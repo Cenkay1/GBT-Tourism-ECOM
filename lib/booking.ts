@@ -479,8 +479,12 @@ export async function markBookingPaid(
 // Admin elden/nakit satış: rezervasyonu oluştur, anında ODENDI + koltukları SATILDI yap.
 // Koltuk kilitleme / kontenjan / cinsiyet doğrulaması createPendingBooking'ten gelir.
 export async function createManualPaidBooking(
-  input: CreateBookingInput & { totalOverride?: number | null }
+  input: CreateBookingInput & {
+    totalOverride?: number | null;
+    paymentMethod?: "NAKIT" | "HAVALE";
+  }
 ): Promise<CreateResult> {
+  const method = input.paymentMethod ?? "NAKIT";
   // Acente elden satışı: online satışa kapatılmış (BLOKE) koltuklar satılabilir ve
   // tarihi geçmiş sefere de kayıt girilebilir (sonradan işlenen satışlar).
   const created = await createPendingBooking({
@@ -490,9 +494,9 @@ export async function createManualPaidBooking(
   });
   if (!created.ok) return created;
 
-  const paid = await markBookingPaid(created.bookingId, "NAKIT", {
+  const paid = await markBookingPaid(created.bookingId, method, {
     notify: false,
-    paymentMethod: "NAKIT",
+    paymentMethod: method,
   });
   if (!paid.ok) {
     // Ödeme işaretlenemezse kilitli koltukları serbest bırak.
@@ -518,6 +522,37 @@ export async function createManualPaidBooking(
   }
 
   return created;
+}
+
+// Admin elden satış, KREDI_KARTI: rezervasyon BEKLIYOR olarak açılır (koltuklar
+// kilitli), tutar/ödeme yöntemi yazılır; ödemeyi çağıran taraf müşteriyi (ya da
+// görevliyi) iyzico'nun güvenli sayfasına yönlendirir. ODENDI'ya geçiş,
+// iyzico callback'inde doğrulandıktan sonra olur — kart verisi sistemimize girmez.
+export async function createManualCardBooking(
+  input: CreateBookingInput & { totalOverride?: number | null }
+): Promise<CreateResult> {
+  const created = await createPendingBooking({
+    ...input,
+    allowBlocked: true,
+    allowPast: true,
+  });
+  if (!created.ok) return created;
+
+  const override =
+    input.totalOverride != null && Number.isFinite(input.totalOverride) && input.totalOverride >= 0
+      ? Math.round(input.totalOverride)
+      : null;
+  const amount = override ?? created.amount;
+  if (amount <= 0) {
+    await cancelBooking(created.bookingId);
+    return { ok: false, error: "Kredi kartı ödemesi için tutar 0'dan büyük olmalı." };
+  }
+
+  await prisma.booking.update({
+    where: { id: created.bookingId },
+    data: { paymentMethod: "KREDI_KARTI", totalAmount: amount },
+  });
+  return { ok: true, bookingId: created.bookingId, amount };
 }
 
 // Ödeme iptal/başarısız: koltukları serbest bırak, rezervasyonu iptal et.

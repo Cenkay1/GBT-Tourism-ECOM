@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
+import { PAYMENT_METHODS, paymentMethodLabel } from "@/lib/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,6 @@ const statusLabel: Record<string, string> = {
   BEKLIYOR: "Bekliyor",
   IPTAL: "İptal",
   SURE_DOLDU: "Süre Doldu",
-};
-const payLabel: Record<string, string> = { NAKIT: "Nakit", ONLINE: "Online" };
-const payStyle: Record<string, string> = {
-  NAKIT: "bg-amber-50 text-amber-700",
-  ONLINE: "bg-sky-50 text-sky-700",
 };
 
 // Yaş onayı bekleyen (çocuk/bebek, onaylanmamış) yolcu sayısı.
@@ -111,10 +107,10 @@ export default async function AdminBookings() {
                     <td className="px-4 py-3">
                       <span
                         className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                          payStyle[b.paymentMethod] ?? "bg-slate-100 text-slate-500"
+                          PAYMENT_METHODS[b.paymentMethod as keyof typeof PAYMENT_METHODS]?.badge ?? "bg-slate-100 text-slate-500"
                         }`}
                       >
-                        {payLabel[b.paymentMethod] ?? b.paymentMethod}
+                        {paymentMethodLabel(b.paymentMethod)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-500">

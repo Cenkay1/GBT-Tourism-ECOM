@@ -69,6 +69,7 @@ export default function AdminSaleForm({
   // KOLTUK: her seçilen koltuk bir yolcu satırı. KONTENJAN: quantity kadar satır.
   const [rows, setRows] = useState<PassRow[]>(isKoltuk ? [] : [emptyRow()]);
   const [quantity, setQuantity] = useState(isKoltuk ? 0 : 1);
+  const [paymentMethod, setPaymentMethod] = useState<"NAKIT" | "HAVALE" | "KREDI_KARTI">("NAKIT");
   const [totalTouched, setTotalTouched] = useState(false);
   const [total, setTotal] = useState(tour.price);
 
@@ -319,12 +320,59 @@ export default function AdminSaleForm({
         </div>
       </div>
 
+      {/* Ödeme yöntemi */}
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <h2 className="mb-1 font-bold text-brand">Ödeme Yöntemi</h2>
+        <p className="mb-4 text-xs text-slate-400">
+          Nakit ve havale anında “Ödendi” kaydedilir. Kredi kartında kart bilgileri sistemimize
+          girilmez: iyzico’nun güvenli ödeme sayfasına yönlendirilirsiniz.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {(
+            [
+              ["NAKIT", "Nakit", "Para elden alındı"],
+              ["HAVALE", "Havale / EFT", "Banka transferi alındı"],
+              ["KREDI_KARTI", "Kredi Kartı", "iyzico güvenli sayfasında çekilir"],
+            ] as const
+          ).map(([value, title, hint]) => (
+            <label
+              key={value}
+              className={`cursor-pointer rounded-xl border-2 p-4 transition ${
+                paymentMethod === value
+                  ? "border-accent bg-accent/5"
+                  : "border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              <input
+                type="radio"
+                name="paymentMethod"
+                value={value}
+                checked={paymentMethod === value}
+                onChange={() => setPaymentMethod(value)}
+                className="sr-only"
+              />
+              <span className="block text-sm font-bold text-slate-800">{title}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">{hint}</span>
+            </label>
+          ))}
+        </div>
+        {paymentMethod === "KREDI_KARTI" && (
+          <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
+            Kaydedince iyzico ödeme sayfası açılır; kartı orada girin. Ödeme tamamlanınca
+            rezervasyon “Ödendi” olur ve müşteriye onay gider. İyzico için müşterinin geçerli
+            e-posta ve cep telefonu zorunludur. Koltuklar ödeme için 15 dakika kilitli kalır.
+          </p>
+        )}
+      </div>
+
       <div className="flex gap-3">
         <button
           disabled={count === 0}
           className="rounded-lg bg-accent px-6 py-2.5 text-sm font-bold text-white hover:bg-accent-dark disabled:opacity-50"
         >
-          Elden Satışı Kaydet ({formatPrice(shownTotal, tour.currency)})
+          {paymentMethod === "KREDI_KARTI"
+            ? `iyzico Ödeme Sayfasına Geç (${formatPrice(shownTotal, tour.currency)})`
+            : `Elden Satışı Kaydet (${formatPrice(shownTotal, tour.currency)})`}
         </button>
         <a
           href="/admin/rezervasyonlar"

@@ -142,7 +142,7 @@ model Booking {
   boardingName      String? // yolcunun biniş noktası adı (anlık kopya)
   boardingPlaceId   String? // seçilen biniş noktası (güncel saat için)
   boardingPlace     TourPlace?     @relation(fields: [boardingPlaceId], references: [id])
-  paymentMethod     String         @default("ONLINE") // ONLINE | NAKIT
+  paymentMethod     String         @default("ONLINE") // ONLINE | NAKIT | HAVALE | KREDI_KARTI
   accommodationType String? // SINGLE | MULTI | null (konaklamasız turda null)
   rooms             String? // oda dağılımı, "2-1-0|1-0-1" (yetişkin-çocuk-bebek)
   paymentRef        String?
