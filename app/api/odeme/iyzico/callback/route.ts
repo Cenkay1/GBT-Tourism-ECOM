@@ -20,21 +20,8 @@ function seeOther(req: Request, path: string): Response {
   return NextResponse.redirect(new URL(path, req.url), SEE_OTHER);
 }
 
-export async function POST(req: Request): Promise<Response> {
-  let token = "";
-  try {
-    const form = await req.formData();
-    token = String(form.get("token") ?? "").trim();
-  } catch {
-    // iyzico form-encoded gönderir; yine de JSON gövdeye karşı toleranslı ol.
-    try {
-      const body = (await req.json()) as { token?: unknown };
-      token = String(body.token ?? "").trim();
-    } catch {
-      token = "";
-    }
-  }
-
+// POST ve GET aynı doğrulama/yönlendirme akışını paylaşır.
+async function handleToken(req: Request, token: string): Promise<Response> {
   if (!token) {
     return seeOther(req, "/turlar?hata=Odeme+bilgisi+alinamadi");
   }
@@ -73,25 +60,25 @@ export async function POST(req: Request): Promise<Response> {
   return seeOther(req, `/rezervasyon/basarili?no=${result.bookingId}`);
 }
 
+export async function POST(req: Request): Promise<Response> {
+  let token = "";
+  try {
+    const form = await req.formData();
+    token = String(form.get("token") ?? "").trim();
+  } catch {
+    // iyzico form-encoded gönderir; yine de JSON gövdeye karşı toleranslı ol.
+    try {
+      const body = (await req.json()) as { token?: unknown };
+      token = String(body.token ?? "").trim();
+    } catch {
+      token = "";
+    }
+  }
+  return handleToken(req, token);
+}
+
 // iyzico bazı yapılandırmalarda GET ile de dönebilir.
 export async function GET(req: Request): Promise<Response> {
   const token = new URL(req.url).searchParams.get("token")?.trim() ?? "";
-  if (!token) return seeOther(req, "/turlar");
-  const result = await verifyIyzicoCallback(token);
-  if (!result.ok) {
-    const target = result.bookingId
-      ? `/odeme/${result.bookingId}?hata=${encodeURIComponent(result.error)}`
-      : `/turlar?hata=${encodeURIComponent(result.error)}`;
-    return seeOther(req, target);
-  }
-  const paid = await markBookingPaid(result.bookingId, result.paymentId);
-  if (!paid.ok) {
-    return seeOther(
-      req,
-      `/odeme/${result.bookingId}?hata=${encodeURIComponent(
-        paid.error ?? "Rezervasyon tamamlanamadı."
-      )}`
-    );
-  }
-  return seeOther(req, `/rezervasyon/basarili?no=${result.bookingId}`);
+  return handleToken(req, token);
 }

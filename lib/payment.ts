@@ -231,8 +231,12 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
 
   // 4. Tutar: iyzico'nun sepet toplamı (price) bizim beklediğimizle eşleşmeli.
   // paidPrice DEĞİL — taksitte komisyon müşteriye bindiğinde paidPrice > price olur.
+  // Kuruş hassasiyetinde karşılaştır: yuvarlama, küsuratlı sapmayı gizlemesin.
   const reportedPrice = Number(res.price);
-  if (!Number.isFinite(reportedPrice) || Math.round(reportedPrice) !== booking.totalAmount) {
+  if (
+    !Number.isFinite(reportedPrice) ||
+    Math.round(reportedPrice * 100) !== booking.totalAmount * 100
+  ) {
     console.error("[iyzico tutar uyuşmazlığı]", {
       bookingId,
       beklenen: booking.totalAmount,
