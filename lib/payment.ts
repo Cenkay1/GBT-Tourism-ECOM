@@ -31,6 +31,7 @@ export interface StartPaymentInput {
   contactName: string;
   contactEmail: string;
   contactPhone: string;
+  ip?: string;
   tourTitle: string;
   baseUrl: string;
 }
@@ -108,6 +109,7 @@ export async function startPayment(
         identityNumber,
         email: input.contactEmail,
         gsmNumber: normalizePhone(input.contactPhone),
+        ...(input.ip ? { ip: input.ip } : {}),
         registrationAddress: COMPANY.address,
         city: "Zonguldak",
         country: "Turkey",

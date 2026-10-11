@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
 import { getTestPrisma, createTestBooking } from "./helpers/db";
-import { verifyIyzicoCallback } from "@/lib/payment";
+import { startPayment, verifyIyzicoCallback } from "@/lib/payment";
 import { markBookingPaid, releaseExpiredHolds } from "@/lib/booking";
 import type { CheckoutFormRetrieveResponse } from "@/lib/iyzico";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
@@ -78,6 +78,40 @@ async function createPaymentRecord(bookingId: string, token: string) {
 }
 
 describe("iyzico callback payment flow", () => {
+  it("sends the request IP as buyer.ip when initializing Checkout Form", async () => {
+    const { bookingId } = await createTestBooking(prisma, { status: "BEKLIYOR" });
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toContain("/payment/iyzipos/checkoutform/initialize/auth/ecom");
+      expect(init?.method).toBe("POST");
+      return new Response(
+        JSON.stringify({
+          status: "success",
+          token: "checkout-token",
+          paymentPageUrl: "https://sandbox.iyzico.test/checkout",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startPayment({
+      bookingId,
+      amount: 2000,
+      currency: "TRY",
+      contactName: "Test Müşteri",
+      contactEmail: "test@example.com",
+      contactPhone: "05551112233",
+      ip: "203.0.113.10",
+      tourTitle: "Test Turu",
+      baseUrl: "https://example.com",
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      buyer: { ip?: string };
+    };
+    expect(requestBody.buyer.ip).toBe("203.0.113.10");
+  });
+
   it("declined payment stays unpaid and records failure", async () => {
     const { bookingId, departureId } = await createTestBooking(prisma, {
       status: "BEKLIYOR",

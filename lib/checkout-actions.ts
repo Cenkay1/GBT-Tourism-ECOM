@@ -95,6 +95,7 @@ export async function submitCheckout(fd: FormData) {
       contactName: s(fd, "contactName"),
       contactEmail: s(fd, "contactEmail"),
       contactPhone: s(fd, "contactPhone"),
+      ip: clientIpFrom(reqHeaders) ?? undefined,
       tourTitle: tour?.title ?? "Tur",
       baseUrl,
     }));

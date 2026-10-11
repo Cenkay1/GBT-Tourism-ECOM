@@ -933,6 +933,7 @@ export async function createManualBooking(fd: FormData) {
         contactName: base.contactName,
         contactEmail: base.contactEmail,
         contactPhone: base.contactPhone,
+        ip: clientIpFrom(h) ?? undefined,
         tourTitle: tour!.title,
         baseUrl: `${proto}://${host}`,
       }));
