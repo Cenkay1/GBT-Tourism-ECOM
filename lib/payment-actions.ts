@@ -16,6 +16,14 @@ export async function simulateSuccess(bookingId: string) {
   if (!res.ok) {
     redirect(`/odeme/${bookingId}?hata=${encodeURIComponent(res.error ?? "Ödeme tamamlanamadı.")}`);
   }
+  // Elden satışta görevli kartla öderken (KREDI_KARTI) sonuç panele döner.
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { paymentMethod: true },
+  });
+  if (booking?.paymentMethod === "KREDI_KARTI") {
+    redirect(`/admin/rezervasyonlar/${bookingId}?odeme=ok`);
+  }
   redirect(`/rezervasyon/basarili?no=${bookingId}`);
 }
 

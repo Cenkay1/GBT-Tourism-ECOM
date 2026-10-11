@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
-import { bandLabel as bandLabelOf, decodeRooms, type AgeBand } from "@/lib/shared";
+import { bandLabel as bandLabelOf, decodeRooms, paymentMethodLabel, type AgeBand } from "@/lib/shared";
 import {
   setBookingStatus,
   deleteBooking,
@@ -18,6 +18,7 @@ import {
   PhoneIcon,
   MailIcon,
   CalendarIcon,
+  WalletIcon,
 } from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
@@ -60,10 +61,13 @@ const statusLabel: Record<string, string> = {
 
 export default async function BookingDetail({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ odeme?: string }>;
 }) {
   const { id } = await params;
+  const { odeme } = await searchParams;
   const b = await prisma.booking.findUnique({
     where: { id },
     include: {
@@ -125,6 +129,12 @@ export default async function BookingDetail({
         </span>
       </div>
 
+      {odeme === "ok" && (
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          Kart ödemesi iyzico üzerinden alındı, rezervasyon “Ödendi” olarak kaydedildi.
+        </div>
+      )}
+
       <div className="mt-6 grid gap-6 md:grid-cols-[1fr_300px]">
         <div className="space-y-6">
           {/* İletişim bilgileri */}
@@ -138,6 +148,11 @@ export default async function BookingDetail({
                 icon={<CalendarIcon width={16} height={16} />}
                 label="Rezervasyon Tarihi"
                 value={formatDate(b.createdAt.toISOString())}
+              />
+              <Field
+                icon={<WalletIcon width={16} height={16} />}
+                label="Ödeme Yöntemi"
+                value={paymentMethodLabel(b.paymentMethod)}
               />
             </dl>
           </section>

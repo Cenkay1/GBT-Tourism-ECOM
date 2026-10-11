@@ -20,7 +20,8 @@ export default async function NewManualSale({
       </Link>
       <h1 className="mb-1 mt-3 text-2xl font-bold text-brand">Elden Satış Ekle</h1>
       <p className="mb-6 text-sm text-slate-500">
-        Nakit/elden alınan satışı kayıt altına alın. Kayıt doğrudan “Ödendi” olarak işaretlenir.
+        Elden alınan satışı kayıt altına alın. Nakit ve havale doğrudan “Ödendi” olarak
+        işaretlenir; kredi kartı seçilirse iyzico güvenli ödeme sayfasına yönlendirilirsiniz.
       </p>
 
       {hata && (

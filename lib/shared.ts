@@ -179,6 +179,22 @@ export interface Banner {
 
 export type Gender = "E" | "K";
 
+// Rezervasyonun ödeme yöntemi. ONLINE = müşterinin sitedeki iyzico ödemesi;
+// NAKIT / HAVALE = elden satışta ödeme alındı; KREDI_KARTI = elden satışta
+// kart iyzico'nun güvenli sayfasında girildi.
+export type PaymentMethod = "ONLINE" | "NAKIT" | "HAVALE" | "KREDI_KARTI";
+
+export const PAYMENT_METHODS: Record<PaymentMethod, { label: string; badge: string; color: string }> = {
+  ONLINE: { label: "Online (iyzico)", badge: "bg-sky-50 text-sky-700", color: "#0284c7" },
+  NAKIT: { label: "Nakit", badge: "bg-amber-50 text-amber-700", color: "#d97706" },
+  HAVALE: { label: "Havale / EFT", badge: "bg-violet-50 text-violet-700", color: "#7c3aed" },
+  KREDI_KARTI: { label: "Kredi Kartı (elden)", badge: "bg-emerald-50 text-emerald-700", color: "#059669" },
+};
+
+export function paymentMethodLabel(m: string): string {
+  return PAYMENT_METHODS[m as PaymentMethod]?.label ?? m;
+}
+
 export type PlaceType = "BINIS" | "GEZI" | "OTEL";
 
 export interface TourPlace {

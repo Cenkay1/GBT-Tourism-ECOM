@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/lib/generated/prisma/client";
@@ -14,8 +15,15 @@ import {
   seatMapLayoutLabel,
   parseSeatMap,
   isValidClockTime,
+  isValidPhone,
 } from "@/lib/shared";
-import { createManualPaidBooking, cancelBookingByAdmin } from "@/lib/booking";
+import {
+  createManualPaidBooking,
+  createManualCardBooking,
+  cancelBooking,
+  cancelBookingByAdmin,
+} from "@/lib/booking";
+import { startPayment } from "@/lib/payment";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
 import type { FormState } from "@/lib/form-state";
 
@@ -878,7 +886,11 @@ export async function createManualBooking(fd: FormData) {
   const totalOverride =
     totalRaw != null && totalRaw !== "" ? Number(totalRaw) : null;
 
-  const result = await createManualPaidBooking({
+  const methodRaw = str(fd, "paymentMethod");
+  const method: "NAKIT" | "HAVALE" | "KREDI_KARTI" =
+    methodRaw === "HAVALE" || methodRaw === "KREDI_KARTI" ? methodRaw : "NAKIT";
+
+  const base = {
     tourId,
     departureId: str(fd, "departureId") || undefined,
     contactName: str(fd, "contactName"),
@@ -888,12 +900,47 @@ export async function createManualBooking(fd: FormData) {
     seatCodes: tour!.bookingType === "KOLTUK" ? seatCodes : undefined,
     quantity: tour!.bookingType === "KONTENJAN" ? num(fd, "quantity") : undefined,
     totalOverride,
-  });
+  };
 
+  const back = (error: string) =>
+    `/admin/rezervasyonlar/yeni?tur=${tourId}&hata=${encodeURIComponent(error)}`;
+
+  // Kredi kartı: iyzico güvenli ödeme sayfasına yönlendir (kart orada girilir).
+  if (method === "KREDI_KARTI") {
+    const contactEmail = str(fd, "contactEmail");
+    if (!/^\S+@\S+\.\S+$/.test(contactEmail) || !isValidPhone(str(fd, "contactPhone"))) {
+      redirect(back("Kredi kartı ödemesi için geçerli bir e-posta ve cep telefonu girilmeli (iyzico zorunlu tutar)."));
+    }
+    const card = await createManualCardBooking(base);
+    if (!card.ok) redirect(back(card.error));
+
+    const h = await headers();
+    const proto = h.get("x-forwarded-proto") ?? "http";
+    const host = h.get("host") ?? "localhost:3000";
+    let redirectUrl: string | null = null;
+    try {
+      ({ redirectUrl } = await startPayment({
+        bookingId: card.bookingId,
+        amount: card.amount,
+        currency: tour!.currency,
+        contactName: base.contactName,
+        contactEmail: base.contactEmail,
+        contactPhone: base.contactPhone,
+        tourTitle: tour!.title,
+        baseUrl: `${proto}://${host}`,
+      }));
+    } catch (e) {
+      // iyzico başlatılamadı: kilitli koltukları geri bırak, görevliye nedeni göster.
+      await cancelBooking(card.bookingId);
+      redirect(back(`iyzico ödeme sayfası açılamadı: ${e instanceof Error ? e.message : "bilinmeyen hata"}`));
+    }
+    revalidatePath("/admin/rezervasyonlar");
+    redirect(redirectUrl!);
+  }
+
+  const result = await createManualPaidBooking({ ...base, paymentMethod: method });
   if (!result.ok) {
-    redirect(
-      `/admin/rezervasyonlar/yeni?tur=${tourId}&hata=${encodeURIComponent(result.error)}`
-    );
+    redirect(back(result.error));
   }
 
   revalidatePath("/admin/rezervasyonlar");
