@@ -12,7 +12,7 @@
 // sarmalayıcısıyla çalışır.
 
 import { randomUUID } from "node:crypto";
-import { VEHICLES, seatCodes, type VehicleType } from "@/lib/shared";
+import { VEHICLES, seatCodes, seatMapCodes, parseSeatMap, type VehicleType } from "@/lib/shared";
 
 // PrismaClient'ın bu modülün kullandığı alt kümesi.
 export interface RawSqlClient {
@@ -114,12 +114,14 @@ interface BusRow {
   vehicleType: string;
   seatRows: number;
   backRowFull: number;
+  seatMap?: string | null; // eski şemada kolon olmayabilir
 }
 
 interface ResolvedLayout {
   vehicleType: VehicleType;
   seatRows: number;
   backRowFull: boolean;
+  seatMap: string[][] | null; // serbest plan: koltuk kodları buradan gelir
 }
 
 // Seferin etkin koltuk düzeni. Öncelik lib/admin-actions.ts içindeki
@@ -131,8 +133,11 @@ async function resolveLayout(
 ): Promise<ResolvedLayout | null> {
   const busId = row.depBusId ?? row.tourBusId;
   if (busId) {
+    // seatMap kolonu bu onarımdan sonra eklenmiş olabilir; yoksa seçme.
+    const cols = await db.$queryRawUnsafe<{ name: string }[]>(`PRAGMA table_info("Bus")`);
+    const mapCol = cols.some((c) => c.name === "seatMap") ? `, "seatMap"` : "";
     const buses = await db.$queryRawUnsafe<BusRow[]>(
-      `SELECT "vehicleType", "seatRows", "backRowFull" FROM "Bus" WHERE id = ?`,
+      `SELECT "vehicleType", "seatRows", "backRowFull"${mapCol} FROM "Bus" WHERE id = ?`,
       busId
     );
     const bus = buses[0];
@@ -141,13 +146,19 @@ async function resolveLayout(
         vehicleType: bus.vehicleType as VehicleType,
         seatRows: bus.seatRows,
         backRowFull: Boolean(bus.backRowFull),
+        seatMap: parseSeatMap(bus.seatMap),
       };
     }
   }
   if (!row.seatRows) return null;
   const vt = (row.vehicleType ?? "OTOBUS") as VehicleType;
   if (!VEHICLES[vt]) return null;
-  return { vehicleType: vt, seatRows: row.seatRows, backRowFull: Boolean(row.backRowFull) };
+  return {
+    vehicleType: vt,
+    seatRows: row.seatRows,
+    backRowFull: Boolean(row.backRowFull),
+    seatMap: null,
+  };
 }
 
 // repairSeatlessDepartures'ın ilk satırında çağrılır: eski Seat(tourId, code)
@@ -210,7 +221,9 @@ export async function repairSeatlessDepartures(db: RawSqlClient): Promise<{
       });
       continue;
     }
-    const codes = seatCodes(layout.vehicleType, layout.seatRows, layout.backRowFull);
+    const codes = layout.seatMap
+      ? seatMapCodes(layout.seatMap)
+      : seatCodes(layout.vehicleType, layout.seatRows, layout.backRowFull);
 
     // Bu seferin koltukları KENDİ transaction'ında yazılır: ortada hata
     // olursa hiçbiri kalmasın (ROLLBACK), yarım koltukla idempotentlik

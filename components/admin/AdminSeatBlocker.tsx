@@ -43,8 +43,8 @@ export default function AdminSeatBlocker({
   return (
     <div>
       <div className="mx-auto w-fit rounded-xl border-2 border-slate-200 p-4">
-        <div className="mb-3 text-right text-[10px] uppercase tracking-wide text-slate-400">
-          Ön (şoför)
+        <div className="mb-3 text-left text-[10px] uppercase tracking-wide text-slate-400">
+          Şoför
         </div>
         <div className="flex flex-col gap-2">
           {rows.map((row, r) => (
@@ -82,7 +82,7 @@ export default function AdminSeatBlocker({
               </div>
               {doorAfterRow === r + 1 && (
                 <div className="my-2 flex items-center gap-2 text-[10px] font-semibold text-slate-400">
-                  <span className="h-px flex-1 bg-slate-200" />🚪 Kapı<span className="h-px flex-1 bg-slate-200" />
+                  <span className="h-px flex-1 bg-slate-200" />Kapı<span className="h-px flex-1 bg-slate-200" />
                 </div>
               )}
             </div>

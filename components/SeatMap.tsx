@@ -9,7 +9,7 @@ import {
   buildSeatGrid,
   formatPrice,
   vehicleLabel,
-  seatNeighbor,
+  seatNeighbors,
   genderLabel,
 } from "@/lib/shared";
 import { BusIcon } from "@/components/Icons";
@@ -39,6 +39,11 @@ export default function SeatMap({
               soldSeats: departure.soldSeats,
               blockedSeats: departure.blockedSeats,
               seatGenders: departure.seatGenders,
+              // Araç sefere göre değişebilir: düzen seçili seferden gelir.
+              vehicleType: departure.vehicleType,
+              seatRows: departure.seatRows,
+              backRowFull: departure.backRowFull,
+              seatMap: departure.seatMap,
             }
           : undefined
       ),
@@ -49,7 +54,10 @@ export default function SeatMap({
   const [warning, setWarning] = useState<string>("");
   const router = useRouter();
 
-  const layout = tour.seatLayout ?? "2+2";
+  // Yan yana kuralı için etkin düzen: serbest plan varsa plandan, yoksa harfli düzenden.
+  const layout = departure?.seatLayout ?? tour.seatLayout ?? "2+2";
+  const seatMap = departure?.seatMap ?? tour.seatMap;
+  const doorAfterRow = departure?.doorAfterRow ?? tour.doorAfterRow;
   const takenGenders = departure?.seatGenders ?? tour.seatGenders ?? {};
 
   // Biniş durakları (varsa) — seçime göre kişi başı fiyat değişir.
@@ -81,11 +89,11 @@ export default function SeatMap({
   // Yan yana kuralı: seçilen cinsiyet, bitişik DOLU koltuktaki yabancı yolcunun
   // cinsiyetiyle çelişmemeli. (Aynı rezervasyonda seçilenler serbest.)
   function conflictReason(code: string, gender: Gender): string | null {
-    const neighbor = seatNeighbor(code, layout);
-    if (!neighbor) return null;
-    const neighborTakenGender = takenGenders[neighbor];
-    if (neighborTakenGender && neighborTakenGender !== gender) {
-      return `${neighbor} koltuğunda ${genderLabel(neighborTakenGender)} bir yolcu var. Yan yana farklı cinsiyet oturamayacağı için bu koltuğu ${genderLabel(gender)} olarak seçemezsiniz.`;
+    for (const neighbor of seatNeighbors(code, { seatMap, layout })) {
+      const neighborTakenGender = takenGenders[neighbor];
+      if (neighborTakenGender && neighborTakenGender !== gender) {
+        return `${neighbor} koltuğunda ${genderLabel(neighborTakenGender)} bir yolcu var. Yan yana farklı cinsiyet oturamayacağı için bu koltuğu ${genderLabel(gender)} olarak seçemezsiniz.`;
+      }
     }
     return null;
   }
@@ -157,9 +165,8 @@ export default function SeatMap({
         )}
 
         <div className="mx-auto w-fit rounded-xl border-2 border-slate-200 p-4">
-          <div className="mb-3 flex items-center justify-end gap-1.5 text-slate-400">
+          <div className="mb-3 flex items-center justify-start text-slate-400">
             <span className="text-[10px] uppercase tracking-wide">Şoför</span>
-            <BusIcon width={18} height={18} />
           </div>
           <div className="flex flex-col gap-2">
             {rows.map((row, r) => (
@@ -188,9 +195,9 @@ export default function SeatMap({
                     )
                   )}
                 </div>
-                {tour.doorAfterRow === r + 1 && (
+                {doorAfterRow === r + 1 && (
                   <div className="my-2 flex items-center gap-2 text-[10px] font-semibold text-slate-400">
-                    <span className="h-px flex-1 bg-slate-200" />🚪 Kapı<span className="h-px flex-1 bg-slate-200" />
+                    <span className="h-px flex-1 bg-slate-200" />Kapı<span className="h-px flex-1 bg-slate-200" />
                   </div>
                 )}
               </div>

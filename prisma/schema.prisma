@@ -24,6 +24,7 @@ model Bus {
   seatRows     Int
   doorAfterRow Int? // orta kapı bu sıradan sonra (null = kapı yok)
   backRowFull  Boolean  @default(false) // son sırada koridorda da koltuk
+  seatMap      String? // serbest koltuk planı (JSON: satır → hücre, hücre = numara ya da "" boşluk). Boşsa eski harfli düzen
   notes        String   @default("")
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())

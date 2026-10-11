@@ -202,6 +202,9 @@ async function main() {
   await add("Tour", "doorAfterRow", `"doorAfterRow" INTEGER`);
   await add("Tour", "backRowFull", `"backRowFull" BOOLEAN NOT NULL DEFAULT false`);
 
+  // Bus
+  await add("Bus", "seatMap", `"seatMap" TEXT`);
+
   // TourPlace
   await add("TourPlace", "boardingTime", `"boardingTime" TEXT`);
   await add("TourPlace", "showOnMap", `"showOnMap" BOOLEAN NOT NULL DEFAULT true`);

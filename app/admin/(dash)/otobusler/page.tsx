@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { deleteBus, toggleBus } from "@/lib/admin-actions";
 import DeleteButton from "@/components/admin/DeleteButton";
-import { VEHICLES, VehicleType } from "@/lib/shared";
+import { VEHICLES, VehicleType, parseSeatMap, seatMapCodes } from "@/lib/shared";
 import { BusIcon } from "@/components/Icons";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,10 @@ function seatCount(b: {
   vehicleType: string;
   seatRows: number;
   backRowFull: boolean;
+  seatMap: string | null;
 }): number {
+  const map = parseSeatMap(b.seatMap);
+  if (map) return seatMapCodes(map).length;
   const v = VEHICLES[b.vehicleType as VehicleType] ?? VEHICLES.OTOBUS;
   return b.seatRows * (v.left.length + v.right.length) + (b.backRowFull ? 1 : 0);
 }

@@ -3,7 +3,8 @@ import { isValidIdDocumentName } from "@/lib/id-documents";
 import {
   isValidId,
   isValidPhone,
-  seatNeighbor,
+  seatNeighbors,
+  parseSeatMap,
   genderLabel,
   priceBooking,
   passengerBand,
@@ -224,7 +225,14 @@ export async function createPendingBooking(
       if (p.seatCode && (p.gender === "E" || p.gender === "K"))
         genderByCode[p.seatCode] = p.gender;
     }
-    const layout = tour.seatLayout ?? "2+2";
+    // Yan yana kuralı için seferin etkin aracı: sefer > tur otobüsü. Serbest
+    // planı olan araçta komşuluk plandan, eski araçta harfli düzenden gelir.
+    const busId = departure.busId ?? tour.busId;
+    const bus = busId ? await prisma.bus.findUnique({ where: { id: busId } }) : null;
+    const neighborSrc = {
+      seatMap: parseSeatMap(bus?.seatMap),
+      layout: bus?.seatLayout ?? tour.seatLayout ?? "2+2",
+    };
 
     // Seçilen koltukların hepsi BOŞ mu? + yan yana cinsiyet kuralı. Atomik kilitleme.
     const result = await prisma.$transaction(async (tx) => {
@@ -255,8 +263,8 @@ export async function createPendingBooking(
         const g = genderByCode[code];
         if (!g)
           return { ok: false as const, error: `${code} için cinsiyet belirtilmedi.` };
-        const neighbor = seatNeighbor(code, layout);
-        if (neighbor && !selectedSet.has(neighbor)) {
+        for (const neighbor of seatNeighbors(code, neighborSrc)) {
+          if (selectedSet.has(neighbor)) continue;
           const ng = takenGender[neighbor];
           if (ng && ng !== g)
             return {
