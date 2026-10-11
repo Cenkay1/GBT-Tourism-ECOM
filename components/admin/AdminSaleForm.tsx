@@ -70,6 +70,9 @@ export default function AdminSaleForm({
   const [rows, setRows] = useState<PassRow[]>(isKoltuk ? [] : [emptyRow()]);
   const [quantity, setQuantity] = useState(isKoltuk ? 0 : 1);
   const [paymentMethod, setPaymentMethod] = useState<"NAKIT" | "HAVALE" | "KREDI_KARTI">("NAKIT");
+  // Rıza teyidi: görevli, müşterinin sözleşmeleri okuduğunu onaylar. Sunucuda
+  // ayrıca zorunludur (lib/consent.ts) — kutu tek başına kanıt değil.
+  const [consentOk, setConsentOk] = useState(false);
   const [totalTouched, setTotalTouched] = useState(false);
   const [total, setTotal] = useState(tour.price);
 
@@ -365,9 +368,37 @@ export default function AdminSaleForm({
         )}
       </div>
 
+      {/* Rıza teyidi — KVKK ve mesafeli satış. Online satışta müşteri kendi
+          işaretler; elden satışta bunu görevli teyit eder. */}
+      <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <h2 className="mb-3 font-bold text-brand">Sözleşme Onayı</h2>
+        <label className="flex items-start gap-2.5 text-sm leading-relaxed text-slate-600">
+          <input
+            type="checkbox"
+            name="onayMesafeliSatis"
+            checked={consentOk}
+            onChange={(e) => setConsentOk(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-accent"
+            required
+          />
+          <span>
+            Müşteriye <strong>Mesafeli Satış Sözleşmesi</strong>,{" "}
+            <strong>İptal / İade Koşulları</strong> ve{" "}
+            <strong>KVKK Aydınlatma Metni</strong> hakkında bilgi verildi; müşteri okudu ve
+            onayladı.
+          </span>
+        </label>
+        {/* Elden satışta tek kutu var; sunucu iki onay beklediği için ikincisi
+            aynı teyitten türetilir. */}
+        <input type="hidden" name="onayKvkk" value={consentOk ? "on" : ""} />
+        <p className="mt-2 text-xs text-slate-400">
+          Bu teyit, tarih ve saatiyle birlikte rezervasyon kaydına işlenir.
+        </p>
+      </div>
+
       <div className="flex gap-3">
         <button
-          disabled={count === 0}
+          disabled={count === 0 || !consentOk}
           className="rounded-lg bg-accent px-6 py-2.5 text-sm font-bold text-white hover:bg-accent-dark disabled:opacity-50"
         >
           {paymentMethod === "KREDI_KARTI"

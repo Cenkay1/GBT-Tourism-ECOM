@@ -23,6 +23,7 @@ import {
   cancelBooking,
   cancelBookingByAdmin,
 } from "@/lib/booking";
+import { checkConsent, clientIpFrom } from "@/lib/consent";
 import { startPayment } from "@/lib/payment";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
 import type { FormState } from "@/lib/form-state";
@@ -905,13 +906,19 @@ export async function createManualBooking(fd: FormData) {
   const back = (error: string) =>
     `/admin/rezervasyonlar/yeni?tur=${tourId}&hata=${encodeURIComponent(error)}`;
 
+  // Rıza teyidi SUNUCUDA zorunlu — formdaki kutu atlanabilir. Elden satışta
+  // teyidi görevli verir; kayda görevlinin isteğinin IP'si işlenir.
+  const consentCheck = checkConsent(fd, clientIpFrom(await headers()));
+  if (!consentCheck.ok) redirect(back(consentCheck.error));
+  const base2 = { ...base, consent: consentCheck.consent };
+
   // Kredi kartı: iyzico güvenli ödeme sayfasına yönlendir (kart orada girilir).
   if (method === "KREDI_KARTI") {
     const contactEmail = str(fd, "contactEmail");
     if (!/^\S+@\S+\.\S+$/.test(contactEmail) || !isValidPhone(str(fd, "contactPhone"))) {
       redirect(back("Kredi kartı ödemesi için geçerli bir e-posta ve cep telefonu girilmeli (iyzico zorunlu tutar)."));
     }
-    const card = await createManualCardBooking(base);
+    const card = await createManualCardBooking(base2);
     if (!card.ok) redirect(back(card.error));
 
     const h = await headers();
@@ -938,7 +945,7 @@ export async function createManualBooking(fd: FormData) {
     redirect(redirectUrl!);
   }
 
-  const result = await createManualPaidBooking({ ...base, paymentMethod: method });
+  const result = await createManualPaidBooking({ ...base2, paymentMethod: method });
   if (!result.ok) {
     redirect(back(result.error));
   }

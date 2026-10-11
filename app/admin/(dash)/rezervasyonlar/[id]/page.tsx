@@ -338,6 +338,28 @@ export default async function BookingDetail({
                 Konaklama: {roomsSummary(b.rooms)}
               </p>
             )}
+            {/* Rıza kaydı — KVKK'da rızanın ALINDIĞININ İSPATI gerekir. */}
+            <p className="mt-3 text-xs text-slate-500">
+              {b.consentAcceptedAt ? (
+                <>
+                  ✓ Sözleşme onayı alındı —{" "}
+                  {b.consentAcceptedAt.toLocaleString("tr-TR", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                  {b.consentVersion && ` · metin sürümü ${b.consentVersion}`}
+                  {b.consentIp && ` · ${b.consentIp}`}
+                </>
+              ) : (
+                <span className="text-amber-700">
+                  Sözleşme onayı kaydı yok (bu özellik eklenmeden önce oluşturulmuş
+                  rezervasyon).
+                </span>
+              )}
+            </p>
             <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-4">
               <span className="text-sm text-slate-500">Toplam</span>
               <span className="text-lg font-extrabold text-accent">

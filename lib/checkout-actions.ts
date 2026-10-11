@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { createPendingBooking, PassengerInput } from "@/lib/booking";
 import { startPayment } from "@/lib/payment";
 import { getCurrentUser } from "@/lib/session";
+import { checkConsent, clientIpFrom } from "@/lib/consent";
 
 function s(fd: FormData, k: string): string {
   return (fd.get(k) as string | null)?.trim() ?? "";
@@ -43,6 +44,18 @@ export async function submitCheckout(fd: FormData) {
     });
   }
 
+  // Rıza (KVKK + mesafeli satış) — SUNUCUDA zorunlu. İstemcideki `required`
+  // niteliği elle hazırlanmış bir istekle atlanabilir; rıza alınmadan satış
+  // yapılmamalı, bu yüzden burada reddediyoruz.
+  const reqHeaders = await headers();
+  const consentCheck = checkConsent(fd, clientIpFrom(reqHeaders));
+  if (!consentCheck.ok) {
+    const t = await prisma.tour.findUnique({ where: { id: tourId } });
+    redirect(
+      `${t ? `/turlar/${t.slug}` : "/turlar"}?hata=${encodeURIComponent(consentCheck.error)}`
+    );
+  }
+
   // Oturumdaki müşteri (varsa) — userId istemciden DEĞİL, sunucudan alınır.
   const currentUser = await getCurrentUser();
 
@@ -58,6 +71,7 @@ export async function submitCheckout(fd: FormData) {
     boardingPlaceId,
     userId: currentUser?.id,
     rooms: s(fd, "rooms") || undefined,
+    consent: consentCheck.consent,
   });
 
   if (!result.ok) {

@@ -37,59 +37,98 @@ async function handleToken(req: Request, token: string): Promise<Response> {
     return seeOther(req, "/turlar?hata=Odeme+bilgisi+alinamadi");
   }
 
-  const result = await verifyIyzicoCallback(token);
+  let bookingId: string | undefined;
+  let adminCard = false;
+  try {
+    const payment = await prisma.payment.findUnique({
+      where: { token },
+      select: { bookingId: true },
+    });
+    bookingId = payment?.bookingId;
 
-  const adminCard = result.bookingId ? await isAdminCardBooking(result.bookingId) : false;
+    const result = await verifyIyzicoCallback(token);
+    bookingId = result.bookingId ?? bookingId;
 
-  if (!result.ok) {
-    if (adminCard) {
+    adminCard = bookingId ? await isAdminCardBooking(bookingId) : false;
+
+    if (!result.ok) {
+      if (adminCard) {
+        return seeOther(
+          req,
+          `/admin/rezervasyonlar/yeni?hata=${encodeURIComponent(
+            `Kart ödemesi tamamlanamadı: ${result.error} Rezervasyon süre dolunca koltuklar otomatik serbest kalır; yeniden deneyebilirsiniz.`
+          )}`
+        );
+      }
+      // Rezervasyon biliniyorsa ödeme sayfasına, değilse belirsiz sonucu göster.
+      if (bookingId) {
+        return seeOther(req, `/odeme/${bookingId}?hata=${encodeURIComponent(result.error)}`);
+      }
+      return new Response("Ödeme sonucu doğrulanamadı. Lütfen acentemizle iletişime geçin.", {
+        status: 502,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    // Ödeme doğrulandı. markBookingPaid koltukları SATILDI'ya çeker, onay
+    // SMS/e-postasını ve sadakat puanını tetikler; ODENDI olan bir rezervasyonda
+    // sessizce başarı döner, yani iyzico callback'i tekrar gönderirse zararsız.
+    const paid = await markBookingPaid(result.bookingId, result.paymentId);
+    if (!paid.ok) {
+      console.error("[iyzico: ödeme alındı ama rezervasyon işlenemedi]", {
+        bookingId: result.bookingId,
+        paymentId: result.paymentId,
+        error: paid.error,
+      });
+      // Para tahsil edildi ama rezervasyon kapatılamadı (ör. hold süresi doldu).
+      // Müşteriye durumu bildir — acente iyzico panelinden iade edebilir.
+      if (adminCard) {
+        return seeOther(
+          req,
+          `/admin/rezervasyonlar/yeni?hata=${encodeURIComponent(
+            `Kart çekildi ama rezervasyon tamamlanamadı (${paid.error ?? "bilinmeyen hata"}). iyzico panelinden iade edin. No: ${result.bookingId.slice(-8).toUpperCase()}`
+          )}`
+        );
+      }
       return seeOther(
         req,
-        `/admin/rezervasyonlar/yeni?hata=${encodeURIComponent(
-          `Kart ödemesi tamamlanamadı: ${result.error} Rezervasyon süre dolunca koltuklar otomatik serbest kalır; yeniden deneyebilirsiniz.`
+        `/odeme/${result.bookingId}?hata=${encodeURIComponent(
+          `${paid.error ?? "Rezervasyon tamamlanamadı."} Ödemeniz alındı, lütfen bizimle iletişime geçin.`
         )}`
       );
     }
-    // Rezervasyonu biliyorsak ödeme sayfasına hatayla dön (koltuk hold'u hâlâ
-    // geçerliyse müşteri tekrar deneyebilir), bilmiyorsak tur listesine.
-    const target = result.bookingId
-      ? `/odeme/${result.bookingId}?hata=${encodeURIComponent(result.error)}`
-      : `/turlar?hata=${encodeURIComponent(result.error)}`;
-    return seeOther(req, target);
-  }
 
-  // Ödeme doğrulandı. markBookingPaid koltukları SATILDI'ya çeker, onay
-  // SMS/e-postasını ve sadakat puanını tetikler; ODENDI olan bir rezervasyonda
-  // sessizce başarı döner, yani iyzico callback'i tekrar gönderirse zararsız.
-  const paid = await markBookingPaid(result.bookingId, result.paymentId);
-  if (!paid.ok) {
-    console.error("[iyzico: ödeme alındı ama rezervasyon işlenemedi]", {
-      bookingId: result.bookingId,
-      paymentId: result.paymentId,
-      error: paid.error,
-    });
-    // Para tahsil edildi ama rezervasyon kapatılamadı (ör. hold süresi doldu).
-    // Müşteriye durumu bildir — acente iyzico panelinden iade edebilir.
     if (adminCard) {
-      return seeOther(
-        req,
-        `/admin/rezervasyonlar/yeni?hata=${encodeURIComponent(
-          `Kart çekildi ama rezervasyon tamamlanamadı (${paid.error ?? "bilinmeyen hata"}). iyzico panelinden iade edin. No: ${result.bookingId.slice(-8).toUpperCase()}`
-        )}`
-      );
+      return seeOther(req, `/admin/rezervasyonlar/${result.bookingId}?odeme=ok`);
     }
     return seeOther(
       req,
-      `/odeme/${result.bookingId}?hata=${encodeURIComponent(
-        `${paid.error ?? "Rezervasyon tamamlanamadı."} Ödemeniz alındı, lütfen bizimle iletişime geçin.`
-      )}`
+      `/rezervasyon/basarili?no=${result.bookingId}`
     );
+  } catch (error) {
+    console.error("[iyzico callback işleme hatası]", { bookingId, error });
+    if (adminCard) {
+      return seeOther(
+        req,
+        `/admin/rezervasyonlar/yeni?hata=${encodeURIComponent(
+          "Ödeme sonucu işlenemedi. Ödeme alındıysa lütfen iyzico panelinden kontrol edin."
+        )}`
+      );
+    }
+    const message = bookingId
+      ? "Ödeme durumunuz doğrulanamadı. Yeniden ödeme yapmadan önce lütfen acentemizle iletişime geçin."
+      : "Ödeme sonucu alınamadı. Lütfen acentemizle iletişime geçin.";
+    const target = bookingId
+      ? `/odeme/${bookingId}?hata=${encodeURIComponent(message)}`
+      : null;
+    if (!target) {
+      return new Response(message, {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+    return seeOther(req, target);
   }
-
-  if (adminCard) {
-    return seeOther(req, `/admin/rezervasyonlar/${result.bookingId}?odeme=ok`);
-  }
-  return seeOther(req, `/rezervasyon/basarili?no=${result.bookingId}`);
 }
 
 export async function POST(req: Request): Promise<Response> {

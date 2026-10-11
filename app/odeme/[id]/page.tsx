@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatPrice } from "@/lib/tours";
+import { isIyzicoConfigured } from "@/lib/payment";
 import { simulateSuccess, simulateCancel } from "@/lib/payment-actions";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,7 @@ export default async function PaymentPage({
   if (!booking) notFound();
 
   const paid = booking.status === "ODENDI";
+  const iyzicoConfigured = isIyzicoConfigured();
   const expired =
     booking.status !== "BEKLIYOR" ||
     (booking.holdExpiresAt != null && booking.holdExpiresAt < new Date());
@@ -30,12 +32,13 @@ export default async function PaymentPage({
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
-      {/* Simülasyon uyarısı */}
-      <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        <strong>Test / Simülasyon Ödeme Ekranı.</strong> Gerçek iyzico ödeme sayfası, üye işyeri
-        anahtarlarınız tanımlandığında burada açılacaktır. Şimdilik akışı test etmek için aşağıdaki
-        butonları kullanın.
-      </div>
+      {!iyzicoConfigured && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <strong>Test / Simülasyon Ödeme Ekranı.</strong> Gerçek iyzico ödeme sayfası, üye işyeri
+          anahtarlarınız tanımlandığında burada açılacaktır. Şimdilik akışı test etmek için aşağıdaki
+          butonları kullanın.
+        </div>
+      )}
 
       <div className="rounded-2xl bg-white p-6 shadow-sm">
         <h1 className="text-lg font-bold text-brand">Ödeme</h1>
@@ -73,6 +76,11 @@ export default async function PaymentPage({
         {paid ? (
           <p className="mt-6 rounded-lg bg-emerald-50 px-3 py-3 text-center text-sm font-semibold text-emerald-700">
             Bu rezervasyonun ödemesi zaten alınmış.
+          </p>
+        ) : iyzicoConfigured ? (
+          <p className="mt-6 rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-800">
+            Ödeme sonucu henüz rezervasyonunuza işlenmedi. Tekrar ödeme yapmadan önce lütfen
+            acentemizle iletişime geçin.
           </p>
         ) : expired ? (
           <p className="mt-6 rounded-lg bg-slate-100 px-3 py-3 text-center text-sm text-slate-500">

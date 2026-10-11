@@ -188,6 +188,23 @@ async function main() {
     console.log("  = Payment tablosu zaten var");
   }
 
+  // Kayıtlı Excel sütun şablonları.
+  if (!(await tableExists("ExcelTemplate"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "ExcelTemplate" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "columns" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX "ExcelTemplate_name_key" ON "ExcelTemplate"("name")`
+    );
+    console.log("  + ExcelTemplate tablosu");
+  } else {
+    console.log("  = ExcelTemplate tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {
@@ -220,6 +237,10 @@ async function main() {
   await add("Booking", "rooms", `"rooms" TEXT`);
   await add("Booking", "accommodationType", `"accommodationType" TEXT`);
   await add("Booking", "paymentMethod", `"paymentMethod" TEXT NOT NULL DEFAULT 'ONLINE'`);
+  // Satın alma rızaları (KVKK + mesafeli satış). Geçmiş kayıtlarda NULL kalır.
+  await add("Booking", "consentAcceptedAt", `"consentAcceptedAt" DATETIME`);
+  await add("Booking", "consentVersion", `"consentVersion" TEXT`);
+  await add("Booking", "consentIp", `"consentIp" TEXT`);
 
   // Passenger
   await add("Passenger", "birthDate", `"birthDate" DATETIME`);

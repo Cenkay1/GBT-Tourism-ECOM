@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import { isValidIdDocumentName } from "@/lib/id-documents";
+import type { ConsentRecord } from "@/lib/consent";
 import {
   isValidId,
   isValidPhone,
@@ -46,6 +47,10 @@ export interface CreateBookingInput {
   userId?: string; // giriş yapan müşteri (sadakat için; misafirde undefined)
   accommodationType?: "SINGLE" | "MULTI"; // eski akış: konaklamalı turda tek/çok kişi
   rooms?: string; // konaklamalı turda oda dağılımı, "2-1-0|1-0-1"
+  // Satın alma öncesi alınan rızalar (KVKK + mesafeli satış). Doğrulaması
+  // çağıran katmanda yapılır (lib/consent.ts checkConsent); burada yalnız
+  // kayda geçer. Yoksa (eski akış / veri) null yazılır — uydurulmaz.
+  consent?: ConsentRecord;
 }
 
 // Eski "SINGLE / MULTI" alanı raporlarda kullanılıyor; oda dağılımı varsa
@@ -297,6 +302,9 @@ export async function createPendingBooking(
           accommodationType: accommodationTypeOf(input.accommodationType, rooms),
           rooms: rooms.length ? input.rooms ?? null : null,
           userId: input.userId ?? null,
+          consentAcceptedAt: input.consent?.consentAcceptedAt ?? null,
+          consentVersion: input.consent?.consentVersion ?? null,
+          consentIp: input.consent?.consentIp ?? null,
           holdExpiresAt,
           passengers: {
             create: input.passengers.map((p, i) => ({
@@ -380,6 +388,9 @@ export async function createPendingBooking(
         accommodationType: accommodationTypeOf(input.accommodationType, rooms),
         rooms: rooms.length ? input.rooms ?? null : null,
         userId: input.userId ?? null,
+        consentAcceptedAt: input.consent?.consentAcceptedAt ?? null,
+        consentVersion: input.consent?.consentVersion ?? null,
+        consentIp: input.consent?.consentIp ?? null,
         holdExpiresAt,
         passengers: {
           create: input.passengers.map((p, i) => ({

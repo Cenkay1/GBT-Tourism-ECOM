@@ -12,6 +12,12 @@ import { isIyzicoConfigured } from "@/lib/payment";
 // Simülasyon: "ödeme başarılı" — iyzico anahtarları tanımlı değilken
 // /odeme/<id> test ekranından çağrılır.
 export async function simulateSuccess(bookingId: string) {
+  if (isIyzicoConfigured()) {
+    redirect(
+      `/odeme/${bookingId}?hata=${encodeURIComponent("Gerçek iyzico ödemesi simüle edilemez.")}`
+    );
+  }
+
   const res = await markBookingPaid(bookingId, `SIM-${Date.now()}`);
   if (!res.ok) {
     redirect(`/odeme/${bookingId}?hata=${encodeURIComponent(res.error ?? "Ödeme tamamlanamadı.")}`);
@@ -29,6 +35,12 @@ export async function simulateSuccess(bookingId: string) {
 
 // Simülasyon: "ödeme iptal" — koltukları serbest bırak.
 export async function simulateCancel(bookingId: string) {
+  if (isIyzicoConfigured()) {
+    redirect(
+      `/odeme/${bookingId}?hata=${encodeURIComponent("Gerçek iyzico ödemesi simüle edilemez.")}`
+    );
+  }
+
   const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
   await cancelBooking(bookingId);
   const tour = booking

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ConsentCheckboxes from "@/components/ConsentCheckboxes";
 import {
   Gender,
   AgeBand,
@@ -192,6 +193,10 @@ export default function CheckoutForm({
     setErrors(errs);
     return Object.keys(errs).length === 0;
   }
+
+  // Rıza kutuları işaretlenmeden "Ödemeye Geç" açılmaz. Sunucuda ayrıca
+  // kontrol edilir (lib/consent.ts) — bu yalnız kullanıcıya erken geri bildirim.
+  const [consentOk, setConsentOk] = useState(false);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     const fd = new FormData(e.currentTarget);
@@ -510,12 +515,19 @@ export default function CheckoutForm({
             </p>
           ))}
 
+        <ConsentCheckboxes onChange={setConsentOk} />
+
         <button
-          disabled={Boolean(roomsError) || roomsCountMismatch !== 0}
+          disabled={Boolean(roomsError) || roomsCountMismatch !== 0 || !consentOk}
           className="mt-4 w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition enabled:hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
         >
           Ödemeye Geç
         </button>
+        {!consentOk && (
+          <p className="mt-2 text-center text-[11px] font-medium text-slate-500">
+            Devam etmek için yukarıdaki iki onayı işaretleyin.
+          </p>
+        )}
         <p className="mt-2 text-center text-[11px] text-slate-400">
           Koltuklarınız ödeme tamamlanana kadar 15 dk süreyle size ayrılır.
         </p>

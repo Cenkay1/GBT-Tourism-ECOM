@@ -151,6 +151,12 @@ model Booking {
   userId            String? // giriş yapan müşteri (misafir rezervasyonlarda null)
   user              User?          @relation(fields: [userId], references: [id])
   loyaltyAwardedAt  DateTime? // sadakat puanı yazıldı mı (idempotent kontrolü)
+  // Satın alma öncesi alınan rızalar (KVKK + mesafeli satış / iptal-iade).
+  // Rızanın ALINDIĞININ İSPATI için saklanır; geçmiş kayıtlarda null kalır
+  // (geriye dönük rıza uydurulmaz). Sürüm lib/consent.ts'teki CONSENT_VERSION.
+  consentAcceptedAt DateTime?
+  consentVersion    String?
+  consentIp         String?
   createdAt         DateTime       @default(now())
 
   passengers Passenger[]
@@ -312,4 +318,14 @@ model Payment {
   updatedAt     DateTime @updatedAt
 
   @@index([bookingId])
+}
+
+// Kayıtlı Excel sütun şablonu. Görevli "otel listesi" gibi bir sütun kümesini
+// bir kez seçip adlandırır; sonraki dışa aktarımlarda o şablonu seçmesi yeter.
+// Acente küçük olduğu için şablonlar tüm görevliler arasında ortaktır.
+model ExcelTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  columns   String // seçili sütun anahtarları, JSON dizi (lib/excel-columns.ts)
+  createdAt DateTime @default(now())
 }
