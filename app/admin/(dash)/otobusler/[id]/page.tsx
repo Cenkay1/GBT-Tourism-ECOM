@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import BusForm, { BusFormValues } from "@/components/admin/BusForm";
 import { updateBus } from "@/lib/admin-actions";
 import { prisma } from "@/lib/db";
+import { parseSeatMap } from "@/lib/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,7 @@ export default async function EditBusPage({
     seatRows: bus.seatRows,
     doorAfterRow: bus.doorAfterRow ?? undefined,
     backRowFull: bus.backRowFull,
+    seatMap: parseSeatMap(bus.seatMap) ?? undefined,
     notes: bus.notes,
     active: bus.active,
   };

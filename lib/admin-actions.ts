@@ -5,7 +5,16 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/lib/generated/prisma/client";
 import { getSessionEmail } from "@/lib/auth";
-import { VEHICLES, VehicleType, seatCodes, isValidClockTime } from "@/lib/shared";
+import {
+  VEHICLES,
+  VehicleType,
+  SeatMapRows,
+  seatCodes,
+  seatMapCodes,
+  seatMapLayoutLabel,
+  parseSeatMap,
+  isValidClockTime,
+} from "@/lib/shared";
 import { createManualPaidBooking, cancelBookingByAdmin } from "@/lib/booking";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
 import type { FormState } from "@/lib/form-state";
@@ -237,6 +246,14 @@ interface SeatLayout {
   vehicleType: string;
   seatRows: number;
   backRowFull: boolean;
+  seatMap: SeatMapRows | null; // serbest plan varsa koltuk kodları ondan gelir
+}
+
+// Düzenin koltuk kodları: serbest plan varsa numaralar, yoksa eski harfli düzen.
+function layoutCodes(layout: SeatLayout): string[] {
+  return layout.seatMap
+    ? seatMapCodes(layout.seatMap)
+    : seatCodes(layout.vehicleType as VehicleType, layout.seatRows, layout.backRowFull);
 }
 
 // Bir seferin etkin koltuk düzeni: seferin otobüsü > turun otobüsü > turdaki
@@ -254,6 +271,7 @@ async function resolveSeatLayout(
         vehicleType: bus.vehicleType,
         seatRows: bus.seatRows,
         backRowFull: bus.backRowFull,
+        seatMap: parseSeatMap(bus.seatMap),
       };
     }
   }
@@ -262,6 +280,7 @@ async function resolveSeatLayout(
     vehicleType: seat.vehicleType ?? "OTOBUS",
     seatRows: seat.seatRows,
     backRowFull: seat.backRowFull,
+    seatMap: null,
   };
 }
 
@@ -280,24 +299,14 @@ async function syncDepartureSeats(
   const hasActive = seats.some((s) => s.status !== "BOS");
   if (hasActive) return;
 
-  const wanted = seatCodes(
-    layout.vehicleType as VehicleType,
-    layout.seatRows,
-    layout.backRowFull
-  );
+  const wanted = layoutCodes(layout);
   const current = seats.map((s) => s.code);
   const same =
     current.length === wanted.length && wanted.every((c) => current.includes(c));
   if (same) return;
 
   await prisma.seat.deleteMany({ where: { tourId, departureId } });
-  await generateSeats(
-    tourId,
-    departureId,
-    layout.vehicleType,
-    layout.seatRows,
-    layout.backRowFull
-  );
+  await generateSeats(tourId, departureId, layout);
 }
 
 // Otobüsün düzeni değişince onu kullanan (henüz satış olmayan) seferlerin
@@ -317,6 +326,7 @@ async function regenerateSeatsForBus(busId: string): Promise<void> {
       vehicleType: bus.vehicleType,
       seatRows: bus.seatRows,
       backRowFull: bus.backRowFull,
+      seatMap: parseSeatMap(bus.seatMap),
     });
   }
 }
@@ -366,13 +376,7 @@ async function saveDepartures(tourId: string, raw: string, seat: SeatConfig) {
       });
       keptIds.add(created.id);
       if (layout) {
-        await generateSeats(
-          tourId,
-          created.id,
-          layout.vehicleType,
-          layout.seatRows,
-          layout.backRowFull
-        );
+        await generateSeats(tourId, created.id, layout);
       }
     }
   }
@@ -405,13 +409,7 @@ async function saveDepartures(tourId: string, raw: string, seat: SeatConfig) {
       });
       const layout = await resolveSeatLayout(seat, null);
       if (layout) {
-        await generateSeats(
-          tourId,
-          created.id,
-          layout.vehicleType,
-          layout.seatRows,
-          layout.backRowFull
-        );
+        await generateSeats(tourId, created.id, layout);
       }
     }
   }
@@ -486,24 +484,13 @@ async function savePlaces(tourId: string, raw: string) {
 }
 
 // Bir seferin koltuklarını üret (koltuklar sefere bağlıdır).
-async function generateSeats(
-  tourId: string,
-  departureId: string,
-  vehicleType: string,
-  rows: number,
-  backRowFull: boolean
-) {
-  const v = VEHICLES[vehicleType as VehicleType] ?? VEHICLES.OTOBUS;
-  const cols = [...v.left, ...v.right];
-  const data = [];
-  for (let r = 1; r <= rows; r++) {
-    for (const c of cols) {
-      data.push({ tourId, departureId, code: `${r}${c}`, status: "BOS" });
-    }
-    if (backRowFull && r === rows) {
-      data.push({ tourId, departureId, code: `${r}M`, status: "BOS" });
-    }
-  }
+async function generateSeats(tourId: string, departureId: string, layout: SeatLayout) {
+  const data = layoutCodes(layout).map((code) => ({
+    tourId,
+    departureId,
+    code,
+    status: "BOS",
+  }));
   if (data.length) await prisma.seat.createMany({ data });
 }
 
@@ -556,36 +543,11 @@ export async function updateTour(id: string, fd: FormData) {
     const data = await tourDataFromForm(fd);
     const slug = await uniqueSlug(data.title, id);
 
-    const existing = await prisma.tour.findUnique({
-      where: { id },
-      include: { seats: true },
-    });
-
     await prisma.tour.update({ where: { id }, data: { ...data, slug } });
     await saveDepartures(id, str(fd, "departures"), seatConfigOf(data));
 
-    // Araç tipi/sıra değiştiyse ve hiçbir seferde satılmış/kilitli koltuk yoksa
-    // tüm seferlerin koltuklarını yeniden üret.
-    if (data.bookingType === "KOLTUK" && data.seatRows) {
-      const hasActive = existing?.seats.some((s) => s.status !== "BOS");
-      const layoutChanged =
-        existing?.vehicleType !== data.vehicleType ||
-        existing?.seatRows !== data.seatRows ||
-        existing?.backRowFull !== data.backRowFull;
-      if (!hasActive && layoutChanged) {
-        await prisma.seat.deleteMany({ where: { tourId: id } });
-        const departures = await prisma.tourDeparture.findMany({ where: { tourId: id } });
-        for (const d of departures) {
-          await generateSeats(
-            id,
-            d.id,
-            data.vehicleType ?? "OTOBUS",
-            data.seatRows,
-            data.backRowFull ?? false
-          );
-        }
-      }
-    }
+    // Koltuklar saveDepartures içinde her seferin kendi aracına göre güncellenir
+    // (satışı olan sefere dokunulmaz).
     await savePlaces(id, str(fd, "places"));
   } catch (e) {
     const ref = newErrorRef();
@@ -629,26 +591,56 @@ export async function toggleSeatBlock(
 // seçer; koltuk şeması araca göre birebir oluşur ve hatırlatma mesajlarında
 // plaka yazılır.
 
+// Koltuk planı formdan JSON olarak gelir (BusForm'daki çizim aracı). Gönderilmişse
+// geçerli olmak zorunda: bozuk plan sessizce eski düzene düşürülmez.
 function busDataFromForm(fd: FormData) {
   const vehicleType = str(fd, "vehicleType") || "OTOBUS";
-  const layout =
-    VEHICLES[vehicleType as VehicleType]?.layout ?? VEHICLES.OTOBUS.layout;
+  const rawMap = str(fd, "seatMap");
+  const seatMap = parseSeatMap(rawMap);
+  const seatMapError =
+    rawMap.trim() && !seatMap
+      ? "Koltuk planı geçersiz: numaralar 1–999 arası ve tekrarsız olmalı, en az bir koltuk bulunmalı."
+      : null;
+  const seatRows = seatMap ? seatMap.length : Math.max(1, num(fd, "seatRows") || 12);
+  const door = optNum(fd, "doorAfterRow");
   return {
-    name: str(fd, "name"),
-    plate: str(fd, "plate").toLocaleUpperCase("tr"),
-    vehicleType,
-    seatLayout: layout,
-    seatRows: Math.max(1, num(fd, "seatRows") || 12),
-    doorAfterRow: optNum(fd, "doorAfterRow"),
-    backRowFull: str(fd, "backRowFull") === "on",
-    notes: str(fd, "notes"),
-    active: fd.get("active") === "on",
+    data: {
+      name: str(fd, "name"),
+      plate: str(fd, "plate").toLocaleUpperCase("tr"),
+      vehicleType,
+      seatLayout: seatMap
+        ? seatMapLayoutLabel(seatMap)
+        : VEHICLES[vehicleType as VehicleType]?.layout ?? VEHICLES.OTOBUS.layout,
+      seatRows,
+      doorAfterRow: door != null && door >= 1 && door <= seatRows ? door : null,
+      backRowFull: seatMap ? false : str(fd, "backRowFull") === "on",
+      seatMap: seatMap ? JSON.stringify(seatMap) : null,
+      notes: str(fd, "notes"),
+      active: fd.get("active") === "on",
+    },
+    seatMapError,
   };
+}
+
+// Bir aracın koltuk kodları (serbest plan ya da eski harfli düzen).
+function busCodes(b: {
+  vehicleType: string;
+  seatRows: number;
+  backRowFull: boolean;
+  seatMap: string | null;
+}): string[] {
+  const map = parseSeatMap(b.seatMap);
+  return map
+    ? seatMapCodes(map)
+    : seatCodes((b.vehicleType as VehicleType) in VEHICLES ? (b.vehicleType as VehicleType) : "OTOBUS", b.seatRows, b.backRowFull);
 }
 
 export async function createBus(fd: FormData) {
   await requireAdmin();
-  const data = busDataFromForm(fd);
+  const { data, seatMapError } = busDataFromForm(fd);
+  if (seatMapError) {
+    redirect(`/admin/otobusler/yeni?hata=${encodeURIComponent(seatMapError)}`);
+  }
   if (!data.name || !data.plate) {
     redirect(
       `/admin/otobusler?hata=${encodeURIComponent("Otobüs adı ve plaka zorunludur.")}`
@@ -662,11 +654,41 @@ export async function createBus(fd: FormData) {
 
 export async function updateBus(id: string, fd: FormData) {
   await requireAdmin();
-  const data = busDataFromForm(fd);
+  const { data, seatMapError } = busDataFromForm(fd);
+  if (seatMapError) {
+    redirect(`/admin/otobusler/${id}?hata=${encodeURIComponent(seatMapError)}`);
+  }
   if (!data.name || !data.plate) {
     redirect(
       `/admin/otobusler/${id}?hata=${encodeURIComponent("Otobüs adı ve plaka zorunludur.")}`
     );
+  }
+
+  // Koltuk NUMARALARI değişiyorsa, bu aracı kullanan bir seferde satılmış/kilitli/
+  // kapalı koltuk varken izin verilmez: seferdeki koltuklar eski numaralarla
+  // kayıtlı, yeni plan onları göstermez ve dolu koltuk boş görünürdü.
+  // (Yalnız yerleşim/kapı değişip numaralar aynı kalıyorsa serbest.)
+  const before = await prisma.bus.findUnique({ where: { id } });
+  if (before) {
+    const oldCodes = new Set(busCodes(before));
+    const newCodes = busCodes(data);
+    const sameCodes =
+      oldCodes.size === newCodes.length && newCodes.every((c) => oldCodes.has(c));
+    if (!sameCodes) {
+      const activeSeats = await prisma.seat.count({
+        where: {
+          status: { not: "BOS" },
+          departure: { OR: [{ busId: id }, { busId: null, tour: { busId: id } }] },
+        },
+      });
+      if (activeSeats > 0) {
+        redirect(
+          `/admin/otobusler/${id}?hata=${encodeURIComponent(
+            `Bu otobüsü kullanan seferlerde ${activeSeats} satılmış/kilitli/kapalı koltuk var; koltuk numaralarını değiştirmek mevcut satışları bozar. Numaraları aynı bırakıp yalnız yerleşimi/kapıyı değiştirebilir ya da yeni bir otobüs ekleyip seferde onu seçebilirsiniz.`
+          )}`
+        );
+      }
+    }
   }
   await prisma.bus.update({ where: { id }, data });
 

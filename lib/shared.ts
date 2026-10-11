@@ -29,6 +29,7 @@ export interface Tour {
   seatRows?: number;
   doorAfterRow?: number;
   backRowFull?: boolean;
+  seatMap?: SeatMapRows; // araçtan gelen serbest koltuk planı (yoksa eski üretilmiş düzen)
   busId?: string; // turun varsayılan aracı
   bus?: Bus; // çözümlenmiş araç (varsayılan)
   documents?: TourDocument[]; // tur programı dosyaları (PDF/Word)
@@ -69,6 +70,7 @@ export interface TourDeparture {
   seatRows?: number;
   doorAfterRow?: number;
   backRowFull?: boolean;
+  seatMap?: SeatMapRows;
   isPast?: boolean; // kalkış tarihi geçti → arşiv (satışa kapalı)
   sold?: number; // KONTENJAN: bu seferde satılan/kilitli kişi sayısı
   soldSeats?: string[];
@@ -86,13 +88,14 @@ export interface SeatState {
   seatRows?: number;
   doorAfterRow?: number;
   backRowFull?: boolean;
+  seatMap?: SeatMapRows;
 }
 
 // Bir seferin etkin araç düzeni: sefer > tur sırasıyla çözümlenir.
 export function seatLayoutOf(
   tour: Tour,
   dep?: TourDeparture
-): { vehicleType: VehicleType; seatLayout: string; seatRows: number; doorAfterRow?: number; backRowFull: boolean } {
+): { vehicleType: VehicleType; seatLayout: string; seatRows: number; doorAfterRow?: number; backRowFull: boolean; seatMap?: SeatMapRows } {
   const vehicleType = dep?.vehicleType ?? tour.vehicleType ?? "OTOBUS";
   return {
     vehicleType,
@@ -100,6 +103,7 @@ export function seatLayoutOf(
     seatRows: dep?.seatRows ?? tour.seatRows ?? 0,
     doorAfterRow: dep?.doorAfterRow ?? tour.doorAfterRow,
     backRowFull: dep?.backRowFull ?? tour.backRowFull ?? false,
+    seatMap: dep?.seatMap ?? tour.seatMap,
   };
 }
 
@@ -128,6 +132,7 @@ export interface Bus {
   seatRows: number;
   doorAfterRow?: number;
   backRowFull: boolean;
+  seatMap?: SeatMapRows; // serbest koltuk planı: hücre = koltuk numarası, "" = boşluk
   notes: string;
   active: boolean;
 }
@@ -138,6 +143,7 @@ export function busLabel(b: Bus): string {
 }
 
 export function busSeatCount(b: Bus): number {
+  if (b.seatMap) return seatMapCodes(b.seatMap).length;
   const perRow = seatsPerRow(b.vehicleType);
   return b.seatRows * perRow + (b.backRowFull ? 1 : 0);
 }
@@ -246,6 +252,103 @@ export function formatPhone(value: string): string {
   return `0(${n.slice(1, 4)}) ${n.slice(4, 7)} ${n.slice(7, 9)} ${n.slice(9, 11)}`;
 }
 
+// --- Serbest koltuk planı ---
+// Otobüs düzeni artık elle çizilir: her satır bir dizi hücre, hücre ya koltuk
+// numarasıdır ("12") ya da boşluktur (""; koridor / boş yer). Koltuk kodu
+// yalnızca bu numaradır. seatMap'i olmayan eski araçlar harfli (1A, 1B…)
+// üretilmiş düzenle çalışmaya devam eder.
+export type SeatMapRows = string[][];
+
+export const SEAT_MAP_MAX_ROWS = 30;
+export const SEAT_MAP_MAX_COLS = 9;
+
+// JSON metni ya da dizi alır; geçerliyse sütunları eşitlenmiş planı, değilse null döndürür.
+export function parseSeatMap(raw: unknown): SeatMapRows | null {
+  let value: unknown = raw;
+  if (typeof raw === "string") {
+    if (!raw.trim()) return null;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > SEAT_MAP_MAX_ROWS) {
+    return null;
+  }
+  const seen = new Set<string>();
+  const rows: SeatMapRows = [];
+  for (const row of value) {
+    if (!Array.isArray(row) || row.length === 0 || row.length > SEAT_MAP_MAX_COLS) return null;
+    const cells: string[] = [];
+    for (const cell of row) {
+      const label = typeof cell === "number" ? String(cell) : typeof cell === "string" ? cell.trim() : null;
+      if (label === null) return null;
+      if (label !== "") {
+        if (!/^[1-9]\d{0,2}$/.test(label)) return null; // yalnız sayı (1–999)
+        if (seen.has(label)) return null; // her numara tek koltuk
+        seen.add(label);
+      }
+      cells.push(label);
+    }
+    rows.push(cells);
+  }
+  if (seen.size === 0) return null;
+  const width = Math.max(...rows.map((r) => r.length));
+  return rows.map((r) => [...r, ...Array(width - r.length).fill("")]);
+}
+
+// Plandaki koltuk numaraları (satır satır, soldan sağa).
+export function seatMapCodes(map: SeatMapRows): string[] {
+  return map.flat().filter(Boolean);
+}
+
+// "2+2", "2+1" gibi kısa etiket: en sık görülen satır deseninden türetilir.
+export function seatMapLayoutLabel(map: SeatMapRows): string {
+  const counts = new Map<string, number>();
+  for (const row of map) {
+    const groups: number[] = [];
+    let run = 0;
+    for (const cell of row) {
+      if (cell) run++;
+      else if (run) {
+        groups.push(run);
+        run = 0;
+      }
+    }
+    if (run) groups.push(run);
+    if (groups.length === 0) continue;
+    const key = groups.join("+");
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let best = "";
+  let bestCount = 0;
+  for (const [key, n] of counts) {
+    if (n > bestCount) {
+      best = key;
+      bestCount = n;
+    }
+  }
+  return best || "özel";
+}
+
+// Eski (harfli) düzeni plan olarak döndürür — koltuk kodları 1A, 1B, 3M…
+export function legacySeatMap(vt: VehicleType, rows: number, backRowFull = false): SeatMapRows {
+  const { left, right } = VEHICLES[vt] ?? VEHICLES.OTOBUS;
+  const out: SeatMapRows = [];
+  for (let r = 1; r <= rows; r++) {
+    const mid = backRowFull && r === rows ? `${r}M` : "";
+    out.push([...left.map((c) => `${r}${c}`), mid, ...right.map((c) => `${r}${c}`)]);
+  }
+  return out;
+}
+
+// Koltukları satır satır 1, 2, 3… diye yeniden numaralar (boşluklar korunur).
+export function renumberSeatMap(map: SeatMapRows): SeatMapRows {
+  let n = 0;
+  return map.map((row) => row.map((cell) => (cell ? String(++n) : "")));
+}
+
 // --- Yan yana koltuk kuralı ---
 // Aynı sıradaki, koridorun aynı tarafındaki bitişik koltuğu döndürür.
 export function seatNeighbor(code: string, layout: string): string | null {
@@ -263,53 +366,62 @@ export function seatNeighbor(code: string, layout: string): string | null {
   return neighborCol ? `${row}${neighborCol}` : null;
 }
 
-// KOLTUK turları için koltuk düzenini araç tipine göre üret.
+// Bir koltuğun yanındaki (aralarında boşluk olmayan) koltuklar. Serbest planda
+// soldaki ve sağdaki bitişik hücreye bakılır; plan yoksa eski harfli kurala düşer.
+export function seatNeighbors(
+  code: string,
+  src: { seatMap?: SeatMapRows | null; layout?: string | null }
+): string[] {
+  if (src.seatMap) {
+    for (const row of src.seatMap) {
+      const c = row.indexOf(code);
+      if (c < 0) continue;
+      return [row[c - 1], row[c + 1]].filter((x): x is string => Boolean(x));
+    }
+    return [];
+  }
+  const n = seatNeighbor(code, src.layout ?? "2+2");
+  return n ? [n] : [];
+}
+
+function seatCell(
+  code: string,
+  taken: Set<string>,
+  blocked: Set<string>,
+  genders: Record<string, Gender>
+): Seat {
+  const isTaken = taken.has(code);
+  const isBlocked = !isTaken && blocked.has(code);
+  return {
+    code,
+    status: isTaken ? "SATILDI" : isBlocked ? "BLOKE" : "BOS",
+    gender: isTaken ? genders[code] ?? null : null,
+  };
+}
+
+// KOLTUK turları için koltuk düzenini üret: araçta serbest plan varsa o, yoksa
+// araç tipine göre eski düzen. Boşluklar { code: "aisle" } olarak döner.
 export function buildSeatGrid(tour: Tour, state?: SeatState): Seat[][] {
+  if (tour.bookingType !== "KOLTUK") return [];
   // Sıra sayısı ve araç tipi sefere (otobüse) göre değişebilir.
+  const map = state?.seatMap ?? tour.seatMap;
   const rowCount = state?.seatRows ?? tour.seatRows;
   const backRowFull = state?.backRowFull ?? tour.backRowFull;
-  if (tour.bookingType !== "KOLTUK" || !rowCount) return [];
+  if (!map && !rowCount) return [];
   // Sefer durumu verildiyse onu kullan; yoksa tur üzerindeki (tek seferli) duruma düş.
   const taken = new Set(state?.soldSeats ?? tour.soldSeats ?? []);
   const blocked = new Set(state?.blockedSeats ?? tour.blockedSeats ?? []);
   const genders = state?.seatGenders ?? tour.seatGenders ?? {};
   const vt = state?.vehicleType ?? tour.vehicleType ?? "OTOBUS";
-  const { left, right } = VEHICLES[vt] ?? VEHICLES.OTOBUS;
-  const rows: Seat[][] = [];
-  for (let r = 1; r <= rowCount; r++) {
-    const rowSeats: Seat[] = [];
-    for (const c of [...left, "aisle", ...right]) {
-      if (c === "aisle") {
-        const isLast = r === rowCount;
-        if (backRowFull && isLast) {
-          const code = `${r}M`;
-          const isTaken = taken.has(code);
-          const isBlocked = !isTaken && blocked.has(code);
-          rowSeats.push({
-            code,
-            status: isTaken ? "SATILDI" : isBlocked ? "BLOKE" : "BOS",
-            gender: isTaken ? genders[code] ?? null : null,
-          });
-        } else {
-          rowSeats.push({ code: "aisle", status: "BOS" });
-        }
-        continue;
-      }
-      const code = `${r}${c}`;
-      const isTaken = taken.has(code);
-      const isBlocked = !isTaken && blocked.has(code);
-      rowSeats.push({
-        code,
-        status: isTaken ? "SATILDI" : isBlocked ? "BLOKE" : "BOS",
-        gender: isTaken ? genders[code] ?? null : null,
-      });
-    }
-    rows.push(rowSeats);
-  }
-  return rows;
+  const plan = map ?? legacySeatMap(vt, rowCount ?? 0, backRowFull ?? false);
+  return plan.map((row) =>
+    row.map((code) =>
+      code ? seatCell(code, taken, blocked, genders) : { code: "aisle", status: "BOS" as const }
+    )
+  );
 }
 
-// Bir araç tipi + sıra için tüm koltuk kodlarını sırayla döndürür.
+// Bir araç tipi + sıra için tüm koltuk kodlarını sırayla döndürür (eski düzen).
 export function seatCodes(vt: VehicleType, rows: number, backRowFull = false): string[] {
   const { left, right } = VEHICLES[vt];
   const codes: string[] = [];

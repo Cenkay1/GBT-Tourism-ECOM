@@ -58,6 +58,7 @@ export default function AdminSaleForm({
                   seatRows: departure.seatRows,
                   doorAfterRow: departure.doorAfterRow,
                   backRowFull: departure.backRowFull,
+                  seatMap: departure.seatMap,
                 }
               : undefined
           )

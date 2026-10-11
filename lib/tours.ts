@@ -15,6 +15,7 @@ import type {
   Bus,
   TourDocument,
 } from "@/lib/shared";
+import { parseSeatMap } from "@/lib/shared";
 import { releaseExpiredHolds } from "@/lib/booking";
 
 export type {
@@ -107,6 +108,7 @@ type BusRow = {
   seatRows: number;
   doorAfterRow: number | null;
   backRowFull: boolean;
+  seatMap: string | null;
   notes: string;
   active: boolean;
 };
@@ -121,6 +123,7 @@ function toBus(row: BusRow): Bus {
     seatRows: row.seatRows,
     doorAfterRow: row.doorAfterRow ?? undefined,
     backRowFull: row.backRowFull,
+    seatMap: parseSeatMap(row.seatMap) ?? undefined,
     notes: row.notes,
     active: row.active,
   };
@@ -191,6 +194,7 @@ function toTour(
     seatRows: row.seatRows ?? undefined,
     doorAfterRow: row.doorAfterRow ?? undefined,
     backRowFull: row.backRowFull ?? false,
+    seatMap: extra?.bus?.seatMap,
     hasAccommodation: row.hasAccommodation ?? false,
     singleSupplement: row.singleSupplement ?? 2000,
     sold: extra?.sold,
@@ -308,6 +312,7 @@ async function buildDepartures(
       seatRows: bus?.seatRows ?? tour.seatRows ?? undefined,
       doorAfterRow: bus?.doorAfterRow ?? tour.doorAfterRow ?? undefined,
       backRowFull: bus?.backRowFull ?? tour.backRowFull ?? false,
+      seatMap: bus?.seatMap,
       isPast: d.departureDate < now,
       sold: tour.bookingType === "KONTENJAN" ? soldByDeparture.get(d.id) ?? 0 : undefined,
       soldSeats: takenRows.map((s) => s.code),
@@ -337,6 +342,7 @@ export function seatStateOf(dep?: TourDeparture): SeatState | undefined {
     seatRows: dep.seatRows,
     doorAfterRow: dep.doorAfterRow,
     backRowFull: dep.backRowFull,
+    seatMap: dep.seatMap,
   };
 }
 

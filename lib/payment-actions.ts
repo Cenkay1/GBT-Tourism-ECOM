@@ -88,6 +88,13 @@ export async function refundBooking(
     });
     ref = res.cancelHostReference ?? res.hostReference ?? res.paymentId;
   } catch (cancelErr) {
+    // Aynı gün iptal mümkün değilse (mutabakat geçmiş) normal akış; ağ
+    // hatasında ise nedeni iz bırakmak için kaydet.
+    console.warn("[iyzico cancel reddedildi, refund deneniyor]", {
+      bookingId,
+      error: cancelErr instanceof Error ? cancelErr.message : String(cancelErr),
+      errorCode: cancelErr instanceof IyzicoError ? cancelErr.errorCode : undefined,
+    });
     try {
       const res = await refundPayment({
         paymentId: payment.paymentId,
