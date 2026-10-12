@@ -17,8 +17,19 @@ import { prisma } from "@/lib/db";
 // da POST atar ve başarı sayfası 405 verir.
 const SEE_OTHER = 303;
 
+// Yönlendirme adresi İSTEK BAŞLIKLARINDAN kurulur, req.url'den DEĞİL.
+//
+// Next.js'te route handler'ın req.url'i vekil sunucunun ilettiği Host başlığını
+// yansıtmaz; sunucunun kendi bağlanma adresini (localhost:3000) verir. Bununla
+// kurulan mutlak adres canlıda "https://localhost:3000/..." çıkar ve müşteri
+// ödeme sonrası kendi makinesine yönlendirilerek hiçbir sayfaya ulaşamaz —
+// ödeme alınmış olsa bile. Host başlığını nginx doğru geçiriyor, o yüzden
+// kaynak olarak onu alıyoruz; yoksa req.url'e düşüyoruz.
 function seeOther(req: Request, path: string): Response {
-  return NextResponse.redirect(new URL(path, req.url), SEE_OTHER);
+  const proto = req.headers.get("x-forwarded-proto") ?? "http";
+  const host = req.headers.get("host");
+  const base = host ? `${proto}://${host}` : req.url;
+  return NextResponse.redirect(new URL(path, base), SEE_OTHER);
 }
 
 // Elden satışta görevli kartı iyzico sayfasında girdiyse (paymentMethod KREDI_KARTI,
