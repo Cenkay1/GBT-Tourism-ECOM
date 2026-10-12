@@ -72,14 +72,31 @@ export function buildAuthorization(params: {
 // ortadan kaldırır.
 // Doküman: https://docs.iyzico.com/en/advanced/response-signature-validation
 
-export function trimPriceZeros(value: string): string {
-  if (!value.includes(".")) return value;
-  return value.replace(/0+$/, "").replace(/\.$/, "");
+// DİKKAT: buraya gelen değerin tipine GÜVENİLMEZ. Aşağıdaki arayüzler alanları
+// `string` ilan eder ama bu yalnız derleme zamanı geçerlidir; gövde iyzico'nun
+// JSON'undan parse edilir ve iyzico fiyatı kimi zaman metin ("1500.0"), kimi
+// zaman SAYI (1) olarak döndürür. Sayı geldiğinde burada .includes çağırmak
+// "TypeError: value.includes is not a function" ile patlıyordu: ödeme iyzico
+// tarafında tamamlanmış olmasına rağmen rezervasyon işlenmeden kalıyordu.
+export function trimPriceZeros(value: string | number): string {
+  const text = String(value ?? "");
+  if (!text.includes(".")) return text;
+  return text.replace(/0+$/, "").replace(/\.$/, "");
 }
 
-function priceVariants(value: string): string[] {
-  const trimmed = trimPriceZeros(value);
-  return trimmed === value ? [value] : [value, trimmed];
+function priceVariants(value: string | number | null | undefined): string[] {
+  if (value === null || value === undefined) return [""];
+  const raw = String(value);
+  const variants = new Set<string>([raw, trimPriceZeros(raw)]);
+  // Değer JSON'da sayı olarak geldiyse metinsel biçimi kaybolmuştur: 1 bize
+  // "1" olarak ulaşır ama iyzico imzayı "1.0" üzerinden hesaplamış olabilir.
+  // Olası biçimleri deniyoruz — imza gizli anahtarla hesaplandığından bu
+  // güvenliği zayıflatmaz, yalnız yanlış ret riskini kaldırır.
+  if (typeof value === "number" && Number.isFinite(value)) {
+    variants.add(value.toFixed(1));
+    variants.add(value.toFixed(2));
+  }
+  return [...variants];
 }
 
 function timingSafeEqualHex(a: string, b: string): boolean {

@@ -217,7 +217,7 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
         where: { id: paymentRecord.id },
         data: {
           status: "BASARISIZ",
-          paymentId: res.paymentId ?? null,
+          paymentId: res.paymentId == null ? null : String(res.paymentId),
           errorCode: res.errorCode ?? null,
           errorMessage: (res.errorMessage ?? error).slice(0, 500),
           ...extra,
@@ -251,6 +251,11 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
     return failed("iyzico ödeme kimliği döndürmedi.");
   }
 
+  // Fiyat alanlarıyla aynı sebep (bkz. lib/iyzico.ts trimPriceZeros): iyzico bu
+  // alanı sayı olarak da döndürebiliyor, şema ise String bekliyor. Metne
+  // çevirmezsek Prisma yazarken "Expected String, provided Int" ile reddeder.
+  const paymentId = String(res.paymentId);
+
   // Başarılı — log satırını tamamla.
   const paidAmount = Number(res.paidPrice);
   if (paymentRecord) {
@@ -258,7 +263,7 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
       where: { id: paymentRecord.id },
       data: {
         status: "BASARILI",
-        paymentId: res.paymentId,
+        paymentId,
         paidAmount: Number.isFinite(paidAmount) ? Math.round(paidAmount) : null,
         installment: res.installment ?? null,
         cardFamily: res.cardFamily ?? null,
@@ -275,7 +280,7 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
       data: {
         bookingId,
         token,
-        paymentId: res.paymentId,
+        paymentId,
         status: "BASARILI",
         amount: booking.totalAmount,
         paidAmount: Number.isFinite(paidAmount) ? Math.round(paidAmount) : null,
@@ -288,5 +293,5 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
     });
   }
 
-  return { ok: true, bookingId, paymentId: res.paymentId };
+  return { ok: true, bookingId, paymentId };
 }

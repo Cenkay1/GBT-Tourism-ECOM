@@ -157,3 +157,49 @@ describe("verifyCheckoutFormSignature", () => {
     expect(verifyCheckoutFormSignature(res, SECRET)).toBe(false);
   });
 });
+
+// iyzico fiyat alanlarını JSON'da SAYI olarak döndürebiliyor ("price": 1).
+// TypeScript tipi `string` der ama bu yalnız derleme zamanı geçerlidir; gelen
+// JSON'un gerçek tipi değişebilir. Sayı geldiğinde kod `.includes` çağırıp
+// "TypeError: e.includes is not a function" ile patlıyordu — ödeme iyzico'da
+// tamamlanmış olmasına rağmen rezervasyon işlenmeden kalıyordu (canlı, 2026-10-12).
+describe("verifyCheckoutFormSignature — fiyat sayı olarak geldiğinde", () => {
+  // Tipi kasıtlı olarak esnetiyoruz: amaç derleyicinin değil, çalışma zamanının
+  // davranışını sınamak.
+  const numeric = {
+    ...baseResponse,
+    paidPrice: 1 as unknown as string,
+    price: 1 as unknown as string,
+  };
+
+  it("sayı fiyatla patlamaz", () => {
+    expect(() => verifyCheckoutFormSignature(numeric, SECRET)).not.toThrow();
+  });
+
+  it("iyzico '1' olarak imzaladıysa kabul eder", () => {
+    const res = { ...numeric };
+    res.signature = signResponse(res, (v) => String(v));
+    expect(verifyCheckoutFormSignature(res, SECRET)).toBe(true);
+  });
+
+  it("iyzico '1.0' olarak imzaladıysa da kabul eder", () => {
+    const res = { ...numeric };
+    res.signature = signResponse(res, (v) => Number(v).toFixed(1));
+    expect(verifyCheckoutFormSignature(res, SECRET)).toBe(true);
+  });
+
+  it("sayı fiyat kurcalanmışsa yine reddeder", () => {
+    const res = { ...numeric };
+    res.signature = signResponse(res, (v) => String(v));
+    const tampered = { ...res, price: 9999 as unknown as string };
+    expect(verifyCheckoutFormSignature(tampered, SECRET)).toBe(false);
+  });
+});
+
+describe("trimPriceZeros — sayı girdi", () => {
+  it("sayı geldiğinde patlamaz", () => {
+    expect(() => trimPriceZeros(1 as unknown as string)).not.toThrow();
+    expect(trimPriceZeros(1 as unknown as string)).toBe("1");
+    expect(trimPriceZeros(10.5 as unknown as string)).toBe("10.5");
+  });
+});
