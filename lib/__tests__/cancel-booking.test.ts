@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { getTestPrisma, createTestBooking } from "./helpers/db";
-import { cancelBookingByAdmin } from "@/lib/booking";
+import { cancelBookingByAdmin, changeBookingSeat } from "@/lib/booking";
 import type { PrismaClient } from "@/lib/generated/prisma/client";
 
 // E-posta gerçekten gönderilmesin; çağrıldığını doğrulamak yeterli.
@@ -19,6 +19,54 @@ beforeAll(async () => {
 });
 
 describe("cancelBookingByAdmin", () => {
+  it("moves a paid passenger and releases only the old seat", async () => {
+    const { bookingId, departureId } = await createTestBooking(prisma, { seatCodes: ["1A"] });
+    const passenger = await prisma.passenger.findFirstOrThrow({ where: { bookingId } });
+    expect(await changeBookingSeat(bookingId, passenger.id, "2A")).toEqual({ ok: true });
+    expect((await prisma.passenger.findUniqueOrThrow({ where: { id: passenger.id } })).seatCode).toBe("2A");
+    expect((await prisma.seat.findFirstOrThrow({ where: { departureId, code: "1A" } })).status).toBe("BOS");
+    expect((await prisma.seat.findFirstOrThrow({ where: { departureId, code: "2A" } })).status).toBe("SATILDI");
+    expect((await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).totalAmount).toBe(2000);
+  });
+
+  it("rejects occupied targets and passengers from another booking", async () => {
+    const first = await createTestBooking(prisma, { seatCodes: ["1A", "1B"] });
+    const other = await createTestBooking(prisma);
+    const passenger = await prisma.passenger.findFirstOrThrow({ where: { bookingId: first.bookingId } });
+    const outsider = await prisma.passenger.findFirstOrThrow({ where: { bookingId: other.bookingId } });
+    expect((await changeBookingSeat(first.bookingId, passenger.id, "1B")).ok).toBe(false);
+    expect((await changeBookingSeat(first.bookingId, outsider.id, "2A")).ok).toBe(false);
+    expect((await prisma.passenger.findUniqueOrThrow({ where: { id: passenger.id } })).seatCode).toBe("1A");
+  });
+
+  it("keeps pending seat locks and other departures unchanged", async () => {
+    const { bookingId, departureId, tourId } = await createTestBooking(prisma, { status: "BEKLIYOR", seatCodes: ["1A"] });
+    const other = await prisma.tourDeparture.create({ data: { tourId, departureDate: new Date() } });
+    const otherSeat = await prisma.seat.create({ data: { tourId, departureId: other.id, code: "1A", status: "SATILDI", gender: "K" } });
+    const passenger = await prisma.passenger.findFirstOrThrow({ where: { bookingId } });
+    expect((await changeBookingSeat(bookingId, passenger.id, "2A")).ok).toBe(true);
+    expect((await prisma.seat.findFirstOrThrow({ where: { departureId, code: "2A" } })).status).toBe("KILITLI");
+    expect((await prisma.seat.findUniqueOrThrow({ where: { id: otherSeat.id } })).status).toBe("SATILDI");
+  });
+
+  it("rejects a gender conflict without releasing the old seat", async () => {
+    const { bookingId, departureId, tourId } = await createTestBooking(prisma, { seatCodes: ["1A"] });
+    await prisma.tour.update({ where: { id: tourId }, data: { seatLayout: "2+2" } });
+    await prisma.seat.updateMany({ where: { departureId, code: "2B" }, data: { status: "SATILDI", gender: "K" } });
+    const passenger = await prisma.passenger.findFirstOrThrow({ where: { bookingId } });
+    expect((await changeBookingSeat(bookingId, passenger.id, "2A")).ok).toBe(false);
+    expect((await prisma.seat.findFirstOrThrow({ where: { departureId, code: "1A" } })).status).toBe("SATILDI");
+    expect((await prisma.seat.findFirstOrThrow({ where: { departureId, code: "2A" } })).status).toBe("BOS");
+  });
+
+  it("rejects cancelled and expired bookings", async () => {
+    const { bookingId } = await createTestBooking(prisma, { status: "IPTAL", seatCodes: ["1A"] });
+    const passenger = await prisma.passenger.findFirstOrThrow({ where: { bookingId } });
+    expect((await changeBookingSeat(bookingId, passenger.id, "2A")).ok).toBe(false);
+    await prisma.booking.update({ where: { id: bookingId }, data: { status: "BEKLIYOR", holdExpiresAt: new Date(0) } });
+    expect((await changeBookingSeat(bookingId, passenger.id, "2A")).ok).toBe(false);
+  });
+
   it("SATILDI koltukları boşa alır", async () => {
     const { bookingId, departureId } = await createTestBooking(prisma, {
       status: "ODENDI",

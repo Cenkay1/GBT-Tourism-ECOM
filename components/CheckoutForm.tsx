@@ -194,6 +194,9 @@ export default function CheckoutForm({
     return Object.keys(errs).length === 0;
   }
 
+  // Fatura hangi yolcu adına kesilecek. Varsayılan ilk yolcu.
+  const [faturaYolcu, setFaturaYolcu] = useState(0);
+
   // Rıza kutuları işaretlenmeden "Ödemeye Geç" açılmaz. Sunucuda ayrıca
   // kontrol edilir (lib/consent.ts) — bu yalnız kullanıcıya erken geri bildirim.
   const [consentOk, setConsentOk] = useState(false);
@@ -217,6 +220,7 @@ export default function CheckoutForm({
       {boardingPlaceId && <input type="hidden" name="boardingPlaceId" value={boardingPlaceId} />}
       {departureId && <input type="hidden" name="departureId" value={departureId} />}
       <input type="hidden" name="rooms" value={hasAccommodation ? encodeRooms(rooms) : ""} />
+      <input type="hidden" name="faturaYolcu" value={String(faturaYolcu)} />
       {docs.map((d, i) => (
         <input key={`d${i}`} type="hidden" name={`p_${i}_doc`} value={d} />
       ))}
@@ -292,6 +296,19 @@ export default function CheckoutForm({
                     </div>
                   )}
                 </div>
+                {/* Başlık satırının DIŞINDA kendi satırında: üstteki div iki öğe
+                    için justify-between ile kurulu, üçüncü öğe eklenince metin
+                    sağa itilip sıkışıyordu. */}
+                <label className="mb-3 flex items-center gap-2 text-xs text-slate-600">
+                  <input
+                    type="radio"
+                    name="faturaYolcuSecim"
+                    checked={faturaYolcu === i}
+                    onChange={() => setFaturaYolcu(i)}
+                    className="h-3.5 w-3.5 accent-accent"
+                  />
+                  Fatura bu kişiye kesilsin
+                </label>
                 {!isSeat && errors[`p_${i}_gender`] && (
                   <p data-error="1" className="mb-2 text-xs text-red-600">
                     {errors[`p_${i}_gender`]}

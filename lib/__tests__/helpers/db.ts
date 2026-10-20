@@ -37,6 +37,10 @@ export async function createTestBooking(
     seatCodes?: string[];
     userId?: string | null;
     totalAmount?: number;
+    idNumbers?: string[]; // yolcu kimlik numaraları (fatura testleri için)
+    paymentMethod?: string;
+    currency?: string;
+    departureDate?: Date;
   }
 ): Promise<{ tourId: string; departureId: string; bookingId: string }> {
   const n = ++counter;
@@ -44,6 +48,7 @@ export async function createTestBooking(
   const status = opts?.status ?? "ODENDI";
   const seatStatus = status === "ODENDI" ? "SATILDI" : "KILITLI";
 
+  const departureDate = opts?.departureDate ?? new Date(Date.now() + 7 * 86400000);
   const tour = await prisma.tour.create({
     data: {
       slug: `test-tur-${n}-${Date.now()}`,
@@ -51,9 +56,10 @@ export async function createTestBooking(
       destination: "Test",
       category: "YURT_ICI",
       bookingType: "KOLTUK",
-      departureDate: new Date(Date.now() + 7 * 86400000),
+      departureDate,
       departureLocation: "Test Kalkış",
       price: 1000,
+      currency: opts?.currency ?? "TRY",
       coverImage: "",
       vehicleType: "MINIBUS",
       seatLayout: "1+1",
@@ -86,12 +92,15 @@ export async function createTestBooking(
       contactEmail: `test${n}@example.com`,
       quantity: seatCodes.length,
       userId: opts?.userId ?? null,
+      paymentMethod: opts?.paymentMethod ?? "ONLINE",
       passengers: {
         create: seatCodes.map((code, i) => ({
           firstName: "Yolcu",
           lastName: `${i + 1}`,
           seatCode: code,
           gender: "E",
+          idNumber: opts?.idNumbers?.[i] ?? null,
+          nationality: "TC",
         })),
       },
     },

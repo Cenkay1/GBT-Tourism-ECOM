@@ -10,9 +10,28 @@ import {
   assignRooms,
   roomsTotal,
   validateRooms,
+  parseDepartureDate,
+  departureDateInput,
+  formatDate,
+  formatTime,
 } from "@/lib/shared";
 
 const DEP = "2026-09-01";
+
+describe("departure time zone", () => {
+  it("round trips Turkish midnight regardless of server timezone", () => {
+    const date = parseDepartureDate("2026-10-20T00:30");
+    expect(date.toISOString()).toBe("2026-10-19T21:30:00.000Z");
+    expect(departureDateInput(date)).toBe("2026-10-20T00:30");
+    expect(formatDate(date.toISOString())).toContain("20 Ekim 2026");
+    expect(formatTime(date.toISOString())).toBe("00:30");
+  });
+
+  it("preserves explicitly zoned dates", () => {
+    expect(parseDepartureDate("2026-10-19T21:30:00Z").toISOString()).toBe("2026-10-19T21:30:00.000Z");
+    expect(Number.isNaN(parseDepartureDate("invalid").getTime())).toBe(true);
+  });
+});
 
 // Kalkışta tam olarak `age` yaşında olacak bir doğum tarihi üretir.
 function bornForAge(age: number): string {

@@ -158,6 +158,7 @@ export default function AdminSaleForm({
                 }`}
               >
                 {new Date(d.departureDate).toLocaleString("tr-TR", {
+                  timeZone: "Europe/Istanbul",
                   day: "numeric",
                   month: "long",
                   year: "numeric",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { busSeatCount, type Bus } from "@/lib/shared";
+import { busSeatCount, parseDepartureDate, type Bus } from "@/lib/shared";
 
 // Bir turun seferleri (kalkış/dönüş çiftleri). Aynı tur birden çok sefer içerebilir:
 // örn. ayın 12'si → 17'si ve 18'i → 24'ü, ya da "her hafta Salı".
@@ -36,9 +36,10 @@ function toLocalInput(d: Date): string {
 
 function fmt(v: string): string {
   if (!v) return "—";
-  const d = new Date(v);
+  const d = parseDepartureDate(v);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -52,7 +53,7 @@ function fmt(v: string): string {
 // yeni seferin koltukları boş gelir, eski satışlarla karışmaz.
 function isPast(v: string): boolean {
   if (!v) return false;
-  const d = new Date(v);
+  const d = parseDepartureDate(v);
   return !Number.isNaN(d.getTime()) && d < new Date();
 }
 

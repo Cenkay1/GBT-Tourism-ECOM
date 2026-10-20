@@ -453,8 +453,23 @@ export function formatPrice(price: number, currency: string): string {
   return `${price.toLocaleString("tr-TR")} ${symbols[currency] ?? currency}`;
 }
 
+export function parseDepartureDate(value: string): Date {
+  return new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(value)
+    ? `${value}+03:00` : value);
+}
+
+export function departureDateInput(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -465,6 +480,7 @@ export function formatDate(iso: string): string {
 // gösterilirken bu kullanılır (yalnız tarih yeterli değil).
 export function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -476,6 +492,7 @@ export function formatDateTime(iso: string): string {
 // Yalnız saat: "20:00".
 export function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     hour: "2-digit",
     minute: "2-digit",
   });

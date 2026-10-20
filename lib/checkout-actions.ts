@@ -71,6 +71,7 @@ export async function submitCheckout(fd: FormData) {
     boardingPlaceId,
     userId: currentUser?.id,
     rooms: s(fd, "rooms") || undefined,
+    invoicePassengerIndex: Number(s(fd, "faturaYolcu")) || 0,
     consent: consentCheck.consent,
   });
 

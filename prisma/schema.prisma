@@ -128,39 +128,43 @@ model Seat {
 }
 
 model Booking {
-  id                String         @id @default(cuid())
-  tourId            String
-  tour              Tour           @relation(fields: [tourId], references: [id])
-  departureId       String? // rezervasyonun ait olduğu sefer (backfill sonrası her zaman dolu)
-  departure         TourDeparture? @relation(fields: [departureId], references: [id])
-  status            String         @default("BEKLIYOR") // BEKLIYOR | ODENDI | IPTAL | SURE_DOLDU
-  totalAmount       Int
-  contactName       String
-  contactPhone      String
-  contactEmail      String
-  quantity          Int            @default(1)
-  boardingName      String? // yolcunun biniş noktası adı (anlık kopya)
-  boardingPlaceId   String? // seçilen biniş noktası (güncel saat için)
-  boardingPlace     TourPlace?     @relation(fields: [boardingPlaceId], references: [id])
-  paymentMethod     String         @default("ONLINE") // ONLINE | NAKIT | HAVALE | KREDI_KARTI
-  accommodationType String? // SINGLE | MULTI | null (konaklamasız turda null)
-  rooms             String? // oda dağılımı, "2-1-0|1-0-1" (yetişkin-çocuk-bebek)
-  paymentRef        String?
-  holdExpiresAt     DateTime?
-  reminderSentAt    DateTime? // 24s öncesi hatırlatma gönderildi mi
-  userId            String? // giriş yapan müşteri (misafir rezervasyonlarda null)
-  user              User?          @relation(fields: [userId], references: [id])
-  loyaltyAwardedAt  DateTime? // sadakat puanı yazıldı mı (idempotent kontrolü)
+  id                    String         @id @default(cuid())
+  tourId                String
+  tour                  Tour           @relation(fields: [tourId], references: [id])
+  departureId           String? // rezervasyonun ait olduğu sefer (backfill sonrası her zaman dolu)
+  departure             TourDeparture? @relation(fields: [departureId], references: [id])
+  status                String         @default("BEKLIYOR") // BEKLIYOR | ODENDI | IPTAL | SURE_DOLDU
+  totalAmount           Int
+  contactName           String
+  contactPhone          String
+  contactEmail          String
+  quantity              Int            @default(1)
+  boardingName          String? // yolcunun biniş noktası adı (anlık kopya)
+  boardingPlaceId       String? // seçilen biniş noktası (güncel saat için)
+  boardingPlace         TourPlace?     @relation(fields: [boardingPlaceId], references: [id])
+  paymentMethod         String         @default("ONLINE") // ONLINE | NAKIT | HAVALE | KREDI_KARTI
+  accommodationType     String? // SINGLE | MULTI | null (konaklamasız turda null)
+  rooms                 String? // oda dağılımı, "2-1-0|1-0-1" (yetişkin-çocuk-bebek)
+  paymentRef            String?
+  holdExpiresAt         DateTime?
+  reminderSentAt        DateTime? // 24s öncesi hatırlatma gönderildi mi
+  userId                String? // giriş yapan müşteri (misafir rezervasyonlarda null)
+  user                  User?          @relation(fields: [userId], references: [id])
+  loyaltyAwardedAt      DateTime? // sadakat puanı yazıldı mı (idempotent kontrolü)
   // Satın alma öncesi alınan rızalar (KVKK + mesafeli satış / iptal-iade).
   // Rızanın ALINDIĞININ İSPATI için saklanır; geçmiş kayıtlarda null kalır
   // (geriye dönük rıza uydurulmaz). Sürüm lib/consent.ts'teki CONSENT_VERSION.
-  consentAcceptedAt DateTime?
-  consentVersion    String?
-  consentIp         String?
-  createdAt         DateTime       @default(now())
+  consentAcceptedAt     DateTime?
+  consentVersion        String?
+  consentIp             String?
+  // Fatura hangi yolcu adına kesilecek (0 tabanlı sıra). roomIndex ile aynı
+  // konvansiyon: yolcular iç içe oluşturulduğu için form aşamasında id yok.
+  invoicePassengerIndex Int?
+  createdAt             DateTime       @default(now())
 
   passengers Passenger[]
   payments   Payment[]
+  invoice    Invoice?
 }
 
 model Passenger {
@@ -296,26 +300,26 @@ model Review {
 // Kart verisi TUTULMAZ — yalnızca iyzico'nun döndürdüğü maskeli özet
 // (kart ailesi, son 4 hane) saklanır.
 model Payment {
-  id            String  @id @default(cuid())
-  bookingId     String
-  booking       Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  provider      String  @default("IYZICO")
-  token         String? @unique // checkout form token'ı (callback eşlemesi)
-  paymentId     String? // iyzico ödeme kimliği (iade için gerekli)
-  status        String  @default("BASLATILDI") // BASLATILDI | BASARILI | BASARISIZ | IADE
-  amount        Int // bizim beklediğimiz tutar (Booking.totalAmount kopyası)
-  paidAmount    Int? // iyzico'nun tahsil ettiği tutar (taksitte komisyonla farklı olabilir)
-  currency      String  @default("TRY")
-  installment   Int? // taksit sayısı (1 = tek çekim)
-  cardFamily    String? // örn. "Bonus"
-  cardLastFour  String? // son 4 hane — iyzico'dan geldiği gibi
-  fraudStatus   Int? // 1 onaylı | 0 incelemede | -1 reddedildi
-  errorCode     String?
-  errorMessage  String?
-  refundedAt    DateTime?
-  refundRef     String? // iyzico iade referansı
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String    @id @default(cuid())
+  bookingId    String
+  booking      Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  provider     String    @default("IYZICO")
+  token        String?   @unique // checkout form token'ı (callback eşlemesi)
+  paymentId    String? // iyzico ödeme kimliği (iade için gerekli)
+  status       String    @default("BASLATILDI") // BASLATILDI | BASARILI | BASARISIZ | IADE
+  amount       Int // bizim beklediğimiz tutar (Booking.totalAmount kopyası)
+  paidAmount   Int? // iyzico'nun tahsil ettiği tutar (taksitte komisyonla farklı olabilir)
+  currency     String    @default("TRY")
+  installment  Int? // taksit sayısı (1 = tek çekim)
+  cardFamily   String? // örn. "Bonus"
+  cardLastFour String? // son 4 hane — iyzico'dan geldiği gibi
+  fraudStatus  Int? // 1 onaylı | 0 incelemede | -1 reddedildi
+  errorCode    String?
+  errorMessage String?
+  refundedAt   DateTime?
+  refundRef    String? // iyzico iade referansı
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([bookingId])
 }
@@ -328,4 +332,23 @@ model ExcelTemplate {
   name      String   @unique
   columns   String // seçili sütun anahtarları, JSON dizi (lib/excel-columns.ts)
   createdAt DateTime @default(now())
+}
+
+// Kesilen/kesilecek fatura kaydı. Payment modeliyle aynı mantık: deneme ve
+// sonucu Booking'e kolon olarak değil kendi tablosunda tutulur, böylece ara
+// durumlar (fatura kesildi ama e-Arşiv gönderilemedi) temsil edilebilir.
+model Invoice {
+  id           String    @id @default(cuid())
+  bookingId    String    @unique // mükerrer faturaya DB seviyesinde engel
+  booking      Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  provider     String    @default("PARASUT")
+  contactId    String? // Paraşüt cari id
+  invoiceId    String? // Paraşüt sales_invoice id — oluşur oluşmaz yazılır
+  eArchiveId   String? // Paraşüt e_archive id
+  status       String    @default("BEKLIYOR") // BEKLIYOR | ISLENIYOR | KESILDI | GONDERILDI | BASARISIZ | ELLE
+  attempts     Int       @default(0)
+  errorMessage String?
+  emailSentAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }

@@ -55,10 +55,15 @@ export async function sendSms(to: string, message: string): Promise<boolean> {
 export async function sendEmail(
   to: string,
   subject: string,
-  html: string
+  html: string,
+  // Fatura PDF'i gibi ekler. Opsiyonel — mevcut çağrılar etkilenmez.
+  attachments?: { filename: string; content: Buffer }[]
 ): Promise<boolean> {
   if (!emailConfigured()) {
-    console.log(`[E-POSTA · simülasyon] → ${to}\nKonu: ${subject}\n`);
+    console.log(
+      `[E-POSTA · simülasyon] → ${to}\nKonu: ${subject}\n` +
+        (attachments?.length ? `Ek: ${attachments.map((a) => a.filename).join(", ")}\n` : "")
+    );
     return true;
   }
   try {
@@ -74,6 +79,7 @@ export async function sendEmail(
       to,
       subject,
       html,
+      ...(attachments?.length ? { attachments } : {}),
     });
     return true;
   } catch (e) {

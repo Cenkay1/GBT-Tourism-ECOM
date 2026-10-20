@@ -9,6 +9,7 @@ const COMPANY = "Gözdem Burak Turizm";
 
 function fmtDateTime(d: Date): string {
   return d.toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -218,7 +219,7 @@ export async function sendAgeVerificationRequest(bookingId: string): Promise<voi
       const birth = p.birthDate ? p.birthDate.toLocaleDateString("tr-TR") : "—";
       const doc = p.idDocument ? "Kimlik belgesi yüklendi" : "Belge YOK — tam ücret alındı";
       return `<tr>
-        <td style="padding:6px 8px;border-bottom:1px solid #eee">${p.firstName} ${p.lastName}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee">${escapeHtml(p.firstName)} ${escapeHtml(p.lastName)}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #eee">${band}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #eee">${birth}</td>
         <td style="padding:6px 8px;border-bottom:1px solid #eee">${doc}</td>
@@ -244,8 +245,8 @@ export async function sendAgeVerificationRequest(bookingId: string): Promise<voi
        <tbody>${rows}</tbody>
      </table>
      <p style="font-size:13px;color:#64748b;margin-top:12px">
-       Tur: <strong>${b.tour.title}</strong><br>Kalkış: ${depText}<br>
-       İletişim: ${b.contactName} · ${b.contactPhone}
+       Tur: <strong>${escapeHtml(b.tour.title)}</strong><br>Kalkış: ${depText}<br>
+       İletişim: ${escapeHtml(b.contactName)} · ${escapeHtml(b.contactPhone)}
      </p>
      <p style="margin-top:20px">
        <a href="${adminUrl}"
@@ -279,22 +280,22 @@ function shell(title: string, body: string): string {
 
 function detailsTable(b: BookingWithTour): string {
   const rows: [string, string][] = [
-    ["Tur", b.tour.title],
+    ["Tur", escapeHtml(b.tour.title)],
     ["Kalkış", fmtDateTime(depDate(b))],
     ...((b.departure?.returnDate
       ? [["Dönüş", fmtDateTime(b.departure.returnDate)]]
       : []) as [string, string][]),
-    ["Kalkış Yeri", b.tour.departureLocation],
-    ...((boardingText(b) ? [["Biniş Noktası", boardingText(b)!]] : []) as [
+    ["Kalkış Yeri", escapeHtml(b.tour.departureLocation)],
+    ...((boardingText(b) ? [["Biniş Noktası", escapeHtml(boardingText(b)!)]] : []) as [
       string,
       string
     ][]),
     // Aracın plakası: müşteri otobüsü tanısın.
-    ...((busPlate(b) ? [["Araç", `${busPlate(b)} plakalı otobüs`]] : []) as [
+    ...((busPlate(b) ? [["Araç", `${escapeHtml(busPlate(b)!)} plakalı otobüs`]] : []) as [
       string,
       string
     ][]),
-    ["Detay", seatText(b)],
+    ["Detay", escapeHtml(seatText(b))],
     ["Tutar", formatPrice(b.totalAmount, b.tour.currency)],
     ["Rezervasyon No", ref(b)],
   ];
@@ -309,7 +310,7 @@ function detailsTable(b: BookingWithTour): string {
 function confirmationEmailHtml(b: BookingWithTour): string {
   return shell(
     "Rezervasyonunuz onaylandı",
-    `<p style="font-size:14px;color:#475569">Sayın ${b.contactName}, ödemeniz alındı ve rezervasyonunuz oluşturuldu.</p>${detailsTable(
+    `<p style="font-size:14px;color:#475569">Sayın ${escapeHtml(b.contactName)}, ödemeniz alındı ve rezervasyonunuz oluşturuldu.</p>${detailsTable(
       b
     )}`
   );
@@ -318,7 +319,7 @@ function confirmationEmailHtml(b: BookingWithTour): string {
 function reminderEmailHtml(b: BookingWithTour): string {
   return shell(
     "Turunuz yaklaşıyor",
-    `<p style="font-size:14px;color:#475569">Sayın ${b.contactName}, turunuzun kalkışına az kaldı. Detaylar aşağıdadır.</p>${detailsTable(
+    `<p style="font-size:14px;color:#475569">Sayın ${escapeHtml(b.contactName)}, turunuzun kalkışına az kaldı. Detaylar aşağıdadır.</p>${detailsTable(
       b
     )}<p style="font-size:14px;color:#475569;margin-top:12px">İyi yolculuklar dileriz.</p>`
   );
@@ -346,7 +347,7 @@ export async function sendBookingCancellation(
   if (!b) return;
 
   const passengerList = b.passengers.length
-    ? `<p style="font-size:14px;color:#475569;margin:4px 0"><strong>Yolcular:</strong> ${seatText(b)}</p>`
+    ? `<p style="font-size:14px;color:#475569;margin:4px 0"><strong>Yolcular:</strong> ${escapeHtml(seatText(b))}</p>`
     : "";
 
   // Iade satırı yalnız iade tutarı sıfırdan büyükse gösterilir.
@@ -361,10 +362,10 @@ export async function sendBookingCancellation(
 
   const html = emailShell(
     "Rezervasyonunuz iptal edildi",
-    `<p style="font-size:14px;color:#475569">Sayın ${b.contactName}, aşağıdaki rezervasyonunuz iptal edilmiştir.</p>
+    `<p style="font-size:14px;color:#475569">Sayın ${escapeHtml(b.contactName)}, aşağıdaki rezervasyonunuz iptal edilmiştir.</p>
      <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
        <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Rezervasyon No:</strong> ${ref(b)}</p>
-       <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Tur:</strong> ${b.tour.title}</p>
+       <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Tur:</strong> ${escapeHtml(b.tour.title)}</p>
        <p style="font-size:14px;color:#475569;margin:4px 0"><strong>Kalkış:</strong> ${fmtDateTime(depDate(b))}</p>
        ${passengerList}
      </div>
@@ -375,4 +376,30 @@ export async function sendBookingCancellation(
   );
 
   await sendEmail(b.contactEmail, `${COMPANY} — Rezervasyon İptali (${ref(b)})`, html);
+}
+
+// --- Fatura e-postası ---
+// Tur başladıktan sonra kesilen e-Arşiv faturası PDF ekli gönderilir.
+export async function sendInvoiceEmail(
+  bookingId: string,
+  pdf: Buffer
+): Promise<boolean> {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { tour: true },
+  });
+  if (!booking) return false;
+
+  const no = booking.id.slice(-8).toUpperCase();
+  const html = emailShell(
+    "Faturanız hazır",
+    `<p>Sayın ${escapeHtml(booking.contactName)},</p>
+     <p><strong>${escapeHtml(booking.tour.title)}</strong> turuna ait e-Arşiv faturanız ektedir.</p>
+     <p>Rezervasyon No: <strong>${no}</strong></p>
+     <p>İyi yolculuklar dileriz.</p>`
+  );
+
+  return sendEmail(booking.contactEmail, `Faturanız — ${booking.tour.title}`, html, [
+    { filename: `fatura-${no}.pdf`, content: pdf },
+  ]);
 }

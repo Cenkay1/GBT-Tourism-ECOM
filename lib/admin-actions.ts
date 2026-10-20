@@ -16,12 +16,14 @@ import {
   parseSeatMap,
   isValidClockTime,
   isValidPhone,
+  parseDepartureDate,
 } from "@/lib/shared";
 import {
   createManualPaidBooking,
   createManualCardBooking,
   cancelBooking,
   cancelBookingByAdmin,
+  changeBookingSeat,
 } from "@/lib/booking";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
 import { startPayment } from "@/lib/payment";
@@ -216,9 +218,9 @@ function parseDepartures(raw: string): ParsedDeparture[] {
   const out: ParsedDeparture[] = [];
   for (const r of rows) {
     if (!r?.departureDate) continue;
-    const dep = new Date(r.departureDate);
+    const dep = parseDepartureDate(r.departureDate);
     if (Number.isNaN(dep.getTime())) continue;
-    let ret = r.returnDate ? new Date(r.returnDate) : null;
+    let ret = r.returnDate ? parseDepartureDate(r.returnDate) : null;
     if (ret && (Number.isNaN(ret.getTime()) || ret < dep)) ret = null;
     out.push({
       id: r.id || undefined,
@@ -1055,6 +1057,22 @@ export async function cancelBookingAction(
     ok: true,
     message: "Rezervasyon iptal edildi, koltuklar serbest bırakıldı ve müşteriye bilgi e-postası gönderildi.",
   };
+}
+
+export async function changeBookingSeatAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  await requireAdmin();
+  const bookingId = str(fd, "bookingId");
+  const passengerId = str(fd, "passengerId");
+  const seatCode = str(fd, "seatCode");
+  if (!bookingId || !passengerId || !seatCode) return { error: "Yolcu ve yeni koltuk seçin." };
+  const result = await changeBookingSeat(bookingId, passengerId, seatCode);
+  if (!result.ok) return { error: result.error };
+  revalidatePath("/admin/rezervasyonlar");
+  revalidatePath(`/admin/rezervasyonlar/${bookingId}`);
+  revalidatePath("/turlar", "layout");
+  revalidatePath("/hesabim", "layout");
+  revalidatePath("/rezervasyon/basarili");
+  return { ok: true, message: "Koltuk değiştirildi." };
 }
 
 export async function deleteBooking(id: string) {

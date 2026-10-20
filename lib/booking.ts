@@ -51,6 +51,23 @@ export interface CreateBookingInput {
   // çağıran katmanda yapılır (lib/consent.ts checkConsent); burada yalnız
   // kayda geçer. Yoksa (eski akış / veri) null yazılır — uydurulmaz.
   consent?: ConsentRecord;
+  // Fatura hangi yolcu adına kesilecek (0 tabanlı sıra). Yoksa ilk yolcu.
+  invoicePassengerIndex?: number;
+}
+
+// Fatura hangi yolcu adına kesilecek: yalnız 0 ile yolcu sayısı arasında
+// TAM SAYI bir sıra kabul edilir. Ondalık bir değer (örn. 0.5) SQLite'ta
+// sessizce kırpılabilir ama Postgres'te Int sütununa yazılırken
+// PrismaClientValidationError fırlatır — aralık kontrolü tek başına
+// yetmez, tam sayı olduğu da burada doğrulanır.
+function gecerliFaturaYolcuIndeksi(
+  index: number | undefined,
+  yolcuSayisi: number
+): number | null {
+  if (index === undefined) return null;
+  if (!Number.isInteger(index)) return null;
+  if (index < 0 || index >= yolcuSayisi) return null;
+  return index;
 }
 
 // Eski "SINGLE / MULTI" alanı raporlarda kullanılıyor; oda dağılımı varsa
@@ -302,6 +319,10 @@ export async function createPendingBooking(
           accommodationType: accommodationTypeOf(input.accommodationType, rooms),
           rooms: rooms.length ? input.rooms ?? null : null,
           userId: input.userId ?? null,
+          invoicePassengerIndex: gecerliFaturaYolcuIndeksi(
+            input.invoicePassengerIndex,
+            input.passengers.length
+          ),
           consentAcceptedAt: input.consent?.consentAcceptedAt ?? null,
           consentVersion: input.consent?.consentVersion ?? null,
           consentIp: input.consent?.consentIp ?? null,
@@ -388,6 +409,10 @@ export async function createPendingBooking(
         accommodationType: accommodationTypeOf(input.accommodationType, rooms),
         rooms: rooms.length ? input.rooms ?? null : null,
         userId: input.userId ?? null,
+        invoicePassengerIndex: gecerliFaturaYolcuIndeksi(
+          input.invoicePassengerIndex,
+          input.passengers.length
+        ),
         consentAcceptedAt: input.consent?.consentAcceptedAt ?? null,
         consentVersion: input.consent?.consentVersion ?? null,
         consentIp: input.consent?.consentIp ?? null,
@@ -601,6 +626,62 @@ export async function cancelBooking(bookingId: string): Promise<void> {
         ]
       : []),
   ]);
+}
+
+export async function changeBookingSeat(
+  bookingId: string,
+  passengerId: string,
+  targetCode: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const booking = await tx.booking.findUnique({
+        where: { id: bookingId },
+        include: { passengers: true, tour: true, departure: true },
+      });
+      if (!booking || booking.tour.bookingType !== "KOLTUK")
+        return { ok: false, error: "Koltuklu rezervasyon bulunamadı." };
+      if (!["ODENDI", "BEKLIYOR"].includes(booking.status))
+        return { ok: false, error: "Bu rezervasyonun koltuğu değiştirilemez." };
+      if (booking.status === "BEKLIYOR" && booking.holdExpiresAt && booking.holdExpiresAt < new Date())
+        return { ok: false, error: "Rezervasyon süresi dolmuş." };
+      const passenger = booking.passengers.find((item) => item.id === passengerId);
+      if (!passenger?.seatCode || !["E", "K"].includes(passenger.gender ?? ""))
+        return { ok: false, error: "Yolcu veya koltuk bilgisi geçersiz." };
+      if (passenger.seatCode === targetCode) return { ok: true };
+      const scope = { tourId: booking.tourId, departureId: booking.departureId };
+      const seats = await tx.seat.findMany({ where: scope });
+      const target = seats.find((seat) => seat.code === targetCode);
+      const source = seats.find((seat) => seat.code === passenger.seatCode);
+      const expectedStatus = booking.status === "ODENDI" ? "SATILDI" : "KILITLI";
+      if (!target || target.status !== "BOS" || booking.passengers.some((item) => item.seatCode === targetCode))
+        return { ok: false, error: "Yeni koltuk boş değil veya bu seferde bulunmuyor." };
+      if (!source || source.status !== expectedStatus)
+        return { ok: false, error: "Mevcut koltuk durumu rezervasyonla uyuşmuyor." };
+      const busId = booking.departure?.busId ?? booking.tour.busId;
+      const bus = busId ? await tx.bus.findUnique({ where: { id: busId } }) : null;
+      const neighbors = seatNeighbors(targetCode, {
+        seatMap: parseSeatMap(bus?.seatMap),
+        layout: bus?.seatLayout ?? booking.tour.seatLayout ?? "2+2",
+      });
+      if (seats.some((seat) => neighbors.includes(seat.code) && seat.code !== passenger.seatCode && seat.status !== "BOS" && seat.gender && seat.gender !== passenger.gender))
+        return { ok: false, error: "Yeni koltuk yan yana cinsiyet kuralına uygun değil." };
+      const claimed = await tx.seat.updateMany({
+        where: { id: target.id, status: "BOS" },
+        data: { status: expectedStatus, gender: passenger.gender },
+      });
+      const released = await tx.seat.updateMany({
+        where: { id: source.id, status: expectedStatus },
+        data: { status: "BOS", gender: null },
+      });
+      if (claimed.count !== 1 || released.count !== 1) throw new Error("Koltuk değişimi çakıştı.");
+      await tx.passenger.update({ where: { id: passenger.id }, data: { seatCode: targetCode } });
+      return { ok: true };
+    });
+  } catch (error) {
+    console.error("[Koltuk değişimi hatası]", { bookingId, error });
+    return { ok: false, error: "Koltuk değiştirilemedi. Sayfayı yenileyip tekrar deneyin." };
+  }
 }
 
 // Görevli tarafından iptal: koltukları DURUMU NE OLURSA OLSUN serbest bırakır,

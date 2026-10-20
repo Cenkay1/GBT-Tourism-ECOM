@@ -205,6 +205,33 @@ async function main() {
     console.log("  = ExcelTemplate tablosu zaten var");
   }
 
+  // Fatura kayıtları (Paraşüt e-Arşiv entegrasyonu).
+  if (!(await tableExists("Invoice"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "Invoice" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "bookingId" TEXT NOT NULL,
+        "provider" TEXT NOT NULL DEFAULT 'PARASUT',
+        "contactId" TEXT,
+        "invoiceId" TEXT,
+        "eArchiveId" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'BEKLIYOR',
+        "attempts" INTEGER NOT NULL DEFAULT 0,
+        "errorMessage" TEXT,
+        "emailSentAt" DATETIME,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Invoice_bookingId_fkey" FOREIGN KEY ("bookingId")
+          REFERENCES "Booking" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX "Invoice_bookingId_key" ON "Invoice"("bookingId")`
+    );
+    console.log("  + Invoice tablosu");
+  } else {
+    console.log("  = Invoice tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {
@@ -241,6 +268,7 @@ async function main() {
   await add("Booking", "consentAcceptedAt", `"consentAcceptedAt" DATETIME`);
   await add("Booking", "consentVersion", `"consentVersion" TEXT`);
   await add("Booking", "consentIp", `"consentIp" TEXT`);
+  await add("Booking", "invoicePassengerIndex", `"invoicePassengerIndex" INTEGER`);
 
   // Passenger
   await add("Passenger", "birthDate", `"birthDate" DATETIME`);

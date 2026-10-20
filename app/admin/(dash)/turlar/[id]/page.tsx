@@ -3,16 +3,14 @@ import TourForm, { TourFormValues } from "@/components/admin/TourForm";
 import { updateTour } from "@/lib/admin-actions";
 import { getActiveAmenities, getBuses } from "@/lib/tours";
 import { prisma } from "@/lib/db";
+import { departureDateInput } from "@/lib/shared";
 
 export const dynamic = "force-dynamic";
 
 // Date -> "yyyy-MM-ddTHH:mm" (datetime-local input formatı, yerel saat)
 function toLocalInput(d: Date | null): string | undefined {
   if (!d) return undefined;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
-    d.getHours()
-  )}:${pad(d.getMinutes())}`;
+  return departureDateInput(d);
 }
 
 function parseDocs(v: string): { name: string; url: string; size?: number }[] {

@@ -13,6 +13,8 @@ import { idDocumentViewUrl } from "@/lib/id-documents";
 import DeleteButton from "@/components/admin/DeleteButton";
 import RefundButton from "@/components/admin/RefundButton";
 import CancelBookingButton from "@/components/admin/CancelBookingButton";
+import ChangeSeatForm from "@/components/admin/ChangeSeatForm";
+import InvoiceRetryButton from "@/components/admin/InvoiceRetryButton";
 import {
   UsersIcon,
   PhoneIcon,
@@ -76,9 +78,18 @@ export default async function BookingDetail({
       boardingPlace: true,
       passengers: true,
       payments: { orderBy: { createdAt: "desc" } },
+      invoice: true,
     },
   });
   if (!b) notFound();
+
+  const canChangeSeat = b.tour.bookingType === "KOLTUK" &&
+    (b.status === "ODENDI" || (b.status === "BEKLIYOR" && (!b.holdExpiresAt || b.holdExpiresAt > new Date())));
+  const freeSeats = canChangeSeat ? await prisma.seat.findMany({
+    where: { tourId: b.tourId, departureId: b.departureId, status: "BOS" },
+    select: { code: true },
+    orderBy: { code: "asc" },
+  }) : [];
 
   // iyzico'dan iade edilebilecek ödeme: başarılı, paymentId'si olan ve henüz
   // iade edilmemiş son kayıt. Elden satışta (NAKIT) böyle bir kayıt olmaz.
@@ -225,6 +236,18 @@ export default async function BookingDetail({
             )}
           </section>
 
+          {canChangeSeat && (
+            <ChangeSeatForm
+              bookingId={b.id}
+              passengers={b.passengers.filter((passenger) => passenger.seatCode).map((passenger) => ({
+                id: passenger.id,
+                name: `${passenger.firstName} ${passenger.lastName}`,
+                seatCode: passenger.seatCode!,
+              }))}
+              seats={freeSeats.map((seat) => seat.code)}
+            />
+          )}
+
           {/* iyzico ödeme kayıtları — mutabakat ve uyuşmazlık takibi için.
               Kart verisi tutulmaz; yalnızca iyzico'nun döndürdüğü maskeli özet. */}
           {b.payments.length > 0 && (
@@ -304,6 +327,99 @@ export default async function BookingDetail({
               </div>
             </section>
           )}
+
+          <section className="rounded-2xl bg-white p-6 shadow-sm">
+            <h2 className="mb-4 font-bold text-brand">Fatura</h2>
+            {!b.invoice ? (
+              <p className="text-sm text-slate-400">
+                Henüz fatura kaydı yok. Fatura, tur başladıktan sonra otomatik kesilir.
+              </p>
+            ) : (
+              <div className="space-y-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-md px-2 py-1 text-xs font-semibold ${
+                      b.invoice.status === "GONDERILDI"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : b.invoice.status === "KESILDI"
+                          ? "bg-blue-100 text-blue-700"
+                          : b.invoice.status === "BASARISIZ"
+                            ? "bg-red-100 text-red-700"
+                            : b.invoice.status === "ELLE"
+                              ? "bg-amber-100 text-amber-800"
+                              : // ISLENIYOR'un kendi rengi olmalı: BEKLIYOR ile
+                                // aynı renge düşerse görevli "sırada" ile "şu
+                                // anda işleniyor"u ayırt edemez ve sürmekte
+                                // olan bir çalışmayı gereksizce tetiklemeye
+                                // kalkar.
+                                b.invoice.status === "ISLENIYOR"
+                                ? "bg-indigo-100 text-indigo-700"
+                                : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {b.invoice.status === "GONDERILDI"
+                      ? "Gönderildi"
+                      : b.invoice.status === "KESILDI"
+                        ? "Kesildi — mail bekliyor"
+                        : b.invoice.status === "BASARISIZ"
+                          ? "Hata"
+                          : b.invoice.status === "ELLE"
+                            ? "Elle faturalanacak"
+                            : b.invoice.status === "ISLENIYOR"
+                              ? "İşleniyor"
+                              : "Bekliyor"}
+                  </span>
+                  {b.invoice.invoiceId && (
+                    <span className="text-xs text-slate-500">
+                      Paraşüt No: {b.invoice.invoiceId}
+                    </span>
+                  )}
+                </div>
+                {/* KESILDI, e-Arşiv adımı BAŞARILI olup yalnız mail adımı
+                    patladığında da yazılıyor — yani fatura GİB'e İLETİLMİŞ
+                    OLABİLİR. Rozet kısa kalsın diye bu uyarı ayrı bir
+                    satırda: amaç, "tamamlanmadı"yı "hiçbir belge oluşmadı"
+                    diye okuyan görevlinin Paraşüt panelinden ikinci bir
+                    fatura kesmesini (gerçek mükerrer yasal belge) önlemek. */}
+                {b.invoice.status === "KESILDI" && (
+                  <p className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">
+                    Fatura Paraşüt&apos;te oluştu ve GİB&apos;e İLETİLMİŞ OLABİLİR —
+                    yalnızca müşteriye e-posta gönderimi tamamlanmadı. İkinci bir
+                    fatura kesmeden önce Paraşüt panelinden bu faturanın
+                    durumunu kontrol edin.
+                  </p>
+                )}
+                {b.invoice.emailSentAt && (
+                  <p className="text-xs text-slate-400">
+                    Müşteriye gönderildi:{" "}
+                    {b.invoice.emailSentAt.toLocaleString("tr-TR")}
+                  </p>
+                )}
+                {b.invoice.errorMessage && (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">
+                    {b.invoice.errorMessage}
+                    {b.invoice.attempts > 0 && ` (${b.invoice.attempts} deneme)`}
+                  </p>
+                )}
+                {/* ELLE: v1 kapsamı dışı (döviz tur ya da yabancı uyruklu
+                    alıcı), otomatik denenmez — düğme burada gösterilirse
+                    tıklanınca boru hattı aynı engeli tekrar tespit edip
+                    yine ELLE'ye döner; "çözülebilir bir hata" izlenimi
+                    vermemek için düğme yerine ne yapılması gerektiğini
+                    söyleyen bir açıklama gösteriyoruz. */}
+                {b.invoice.status === "ELLE" ? (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Bu fatura otomatik kesilemez — Paraşüt panelinden elle
+                    kesilmeli.
+                  </p>
+                ) : (
+                  b.invoice.status !== "GONDERILDI" && (
+                    <InvoiceRetryButton bookingId={b.id} />
+                  )
+                )}
+              </div>
+            )}
+          </section>
         </div>
 
         {/* Özet + işlemler */}

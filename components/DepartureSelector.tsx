@@ -6,6 +6,7 @@ import { Tour, TourDeparture, departureSeatsLeft } from "@/lib/shared";
 // satın alırken hangi seferi aldığını burada seçer. Tek sefer varsa gösterilmez.
 export function formatDeparture(iso: string): string {
   return new Date(iso).toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -17,6 +18,7 @@ export function formatDeparture(iso: string): string {
 
 function formatShort(iso: string): string {
   return new Date(iso).toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
     day: "numeric",
     month: "long",
     hour: "2-digit",
