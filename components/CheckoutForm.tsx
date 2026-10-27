@@ -9,6 +9,10 @@ import {
   genderLabel,
   bandLabel,
   bandAgeText,
+  fareBandLabel,
+  fareBandAgeText,
+  passengerFareBand,
+  type FareBand,
   isValidId,
   isValidPhone,
   priceBooking,
@@ -121,6 +125,12 @@ export default function CheckoutForm({
     passengerBand({ birthDate: b || undefined }, departureDate)
   );
   const effectiveBand = (i: number): AgeBand => bands[i] ?? "ADULT";
+  // Ücret bandı tur tipine göre değişir (konaklamalı 4-6 %50, günübirlik 4+ tam).
+  // Rozet, belge zorunluluğu ve açıklama metinleri BUNA bakar; odalama bands'e.
+  const fareBands: FareBand[] = births.map((b) =>
+    passengerFareBand({ birthDate: b || undefined }, departureDate, hasAccommodation)
+  );
+  const effectiveFare = (i: number): FareBand => fareBands[i] ?? "FULL";
 
   const roomsError = hasAccommodation ? validateRooms(rooms, bands) : null;
   const roomsCountMismatch =
@@ -134,6 +144,7 @@ export default function CheckoutForm({
   const priced = priceBooking({
     unitPrice,
     departureDate,
+    hasAccommodation,
     // Yaş bandı doğum tarihinden hesaplanır; ayrıca bildirilmez.
     passengers: births.map((b, i) => ({
       birthDate: b || undefined,
@@ -168,12 +179,11 @@ export default function CheckoutForm({
 
     }
 
-    // Çocuk/bebek yolcu için kimlik belgesi zorunlu (yaş doğrulama).
+    // İndirimli yolcu için kimlik belgesi zorunlu (yaş doğrulama).
     for (let i = 0; i < count; i++) {
-      const band = effectiveBand(i);
-      if (needsIdDocument(band) && !docs[i]) {
+      if (needsIdDocument(effectiveFare(i)) && !docs[i]) {
         errs[`p_${i}_doc`] =
-          `${bandLabel(band)} yolcu için kimlik belgesi yükleyin. ` +
+          `${bandLabel(effectiveBand(i))} yolcu için kimlik belgesi yükleyin. ` +
           `Belge olmadan bu yolcu için indirim uygulanamaz.`;
       }
     }
@@ -257,9 +267,10 @@ export default function CheckoutForm({
                       </span>
                     )}
                     {/* Yaş grubu doğum tarihinden otomatik belirlenir. */}
-                    {births[i] && effectiveBand(i) !== "ADULT" && (
+                    {births[i] && effectiveFare(i) !== "FULL" && (
                       <span className="ml-2 rounded-md bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
-                        {bandLabel(effectiveBand(i))} · {bandAgeText(effectiveBand(i))}
+                        {fareBandLabel(effectiveFare(i))} ·{" "}
+                        {fareBandAgeText(effectiveFare(i), hasAccommodation)}
                       </span>
                     )}
                   </span>
@@ -380,17 +391,17 @@ export default function CheckoutForm({
                   {errors[`p_${i}_birth`] && (
                     <p className="mt-1 text-xs text-red-600">{errors[`p_${i}_birth`]}</p>
                   )}
-                  {priced.perPassenger[i]?.band === "CHILD" && (
+                  {priced.perPassenger[i]?.fareBand === "HALF" && (
                     <p className="mt-1 text-xs font-medium text-accent">
                       {priced.adultCount >= 2
                         ? "%50 çocuk indirimi uygulandı."
                         : "İndirim için rezervasyonda en az 2 yetişkin gerekir."}
                     </p>
                   )}
-                  {priced.perPassenger[i]?.band === "INFANT" &&
+                  {priced.perPassenger[i]?.fareBand === "FREE" &&
                     !priced.perPassenger[i]?.fullFare && (
                       <p className="mt-1 text-xs font-medium text-emerald-700">
-                        Bebek — ücretsiz.
+                        {fareBandAgeText("FREE", hasAccommodation)} — ücretsiz.
                       </p>
                     )}
                   {priced.perPassenger[i]?.fullFare && (
@@ -401,7 +412,7 @@ export default function CheckoutForm({
                 </div>
 
                 {/* Yaş doğrulama belgesi — yalnız çocuk ve bebek için */}
-                {needsIdDocument(effectiveBand(i)) && (
+                {needsIdDocument(effectiveFare(i)) && (
                   <IdDocumentUpload
                     value={docs[i]}
                     onChange={(name) =>
@@ -491,14 +502,14 @@ export default function CheckoutForm({
               }${priced.infantCount ? ` · ${priced.infantCount} bebek` : ""}`}
             />
           )}
-          {priced.childCount > 0 && priced.adultCount >= 2 && (
+          {priced.halfCount > 0 && priced.adultCount >= 2 && (
             <SummaryRow
-              label={`Çocuk indirimi (${priced.childCount})`}
+              label={`Çocuk indirimi (${priced.halfCount})`}
               value={`%50`}
             />
           )}
-          {priced.infantCount > 0 && (
-            <SummaryRow label={`Bebek (${priced.infantCount})`} value="ücretsiz" />
+          {priced.freeCount > 0 && (
+            <SummaryRow label={`Ücretsiz yolcu (${priced.freeCount})`} value="ücretsiz" />
           )}
           {priced.supplement > 0 && (
             <SummaryRow

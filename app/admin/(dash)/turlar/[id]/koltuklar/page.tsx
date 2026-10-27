@@ -7,8 +7,9 @@ import {
   seatStateOf,
   resolveDeparture,
 } from "@/lib/tours";
-import { formatDateTime } from "@/lib/shared";
-import AdminSeatBlocker from "@/components/admin/AdminSeatBlocker";
+import { formatDateTime, seatLayoutOf, seatNeighbors } from "@/lib/shared";
+import { getSeatBoard } from "@/lib/seat-board";
+import AdminSeatBoard from "@/components/admin/AdminSeatBoard";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +36,27 @@ export default async function SeatManagePage({
     resolveDeparture(tour, sefer) ?? departures[departures.length - 1];
   const rows = buildSeatGrid(tour, seatStateOf(active));
 
+  // Kim nerede oturuyor + veri uyuşmazlıkları. Koltuk şeması buildSeatGrid'den
+  // geliyor; tahta bunları koltuk koduyla eşler.
+  const board =
+    active && tour.bookingType === "KOLTUK"
+      ? await getSeatBoard(tour.id, active.id)
+      : { occupants: {}, unseated: [], issues: [] };
+
+  // Yan yana cinsiyet kuralını istemci de gösterebilsin diye komşuluk haritası
+  // SUNUCUDA, kuralın tek kaynağı olan seatNeighbors ile üretilir.
+  const layout = seatLayoutOf(tour, active);
+  const neighbors: Record<string, string[]> = {};
+  for (const row of rows)
+    for (const seat of row)
+      if (seat.code !== "aisle")
+        neighbors[seat.code] = seatNeighbors(seat.code, {
+          seatMap: layout.seatMap,
+          layout: layout.seatLayout,
+        });
+
   return (
-    <div className="mx-auto max-w-2xl">
+    <div className="mx-auto max-w-3xl">
       <nav className="mb-4 text-sm text-slate-500">
         <Link href="/admin/turlar" className="hover:text-brand">Turlar</Link>
         <span className="mx-2">/</span>
@@ -106,11 +126,14 @@ export default async function SeatManagePage({
                 {active.bus && <> · Araç: {active.bus.plate}</>}
               </p>
             )}
-            <AdminSeatBlocker
+            <AdminSeatBoard
               tourId={tour.id}
               departureId={active.id}
               rows={rows}
               doorAfterRow={active.doorAfterRow ?? tour.doorAfterRow}
+              neighbors={neighbors}
+              board={board}
+              isPast={Boolean(active.isPast)}
             />
           </>
         )}

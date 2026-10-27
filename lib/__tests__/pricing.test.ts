@@ -9,6 +9,8 @@ import {
   roomIndexes,
   assignRooms,
   roomsTotal,
+  fareBandForAge,
+  needsIdDocument,
   validateRooms,
   parseDepartureDate,
   departureDateInput,
@@ -68,27 +70,77 @@ describe("passengerBand — yaş grubu yalnız doğum tarihinden", () => {
   });
 });
 
-describe("priceBooking", () => {
-  const base = { unitPrice: 1000, departureDate: DEP, singleSupplement: 2000 };
-  // Belgesi yüklenmiş çocuk/bebek (indirim uygulanabilmesi için gerekir).
-  const child = (age = 6) => ({ birthDate: bornForAge(age), hasIdDocument: true });
-  const infant = (age = 2) => ({ birthDate: bornForAge(age), hasIdDocument: true });
+describe("fareBandForAge — ücret bandı tur tipine göre", () => {
+  it("konaklamalı: 0-3 ücretsiz", () => {
+    expect(fareBandForAge(0, true)).toBe("FREE");
+    expect(fareBandForAge(3, true)).toBe("FREE");
+  });
+  it("konaklamalı: 4-6 yarım", () => {
+    expect(fareBandForAge(4, true)).toBe("HALF");
+    expect(fareBandForAge(6, true)).toBe("HALF");
+  });
+  it("konaklamalı: 7+ tam", () => {
+    expect(fareBandForAge(7, true)).toBe("FULL");
+    expect(fareBandForAge(11, true)).toBe("FULL");
+  });
+  it("günübirlik: 0-3 ücretsiz, 4+ tam", () => {
+    expect(fareBandForAge(3, false)).toBe("FREE");
+    expect(fareBandForAge(4, false)).toBe("FULL");
+    expect(fareBandForAge(6, false)).toBe("FULL");
+  });
+});
 
-  it("2 yetişkin + 1 çocuk → çocuk %50", () => {
-    const r = priceBooking({ ...base, passengers: [{}, {}, child()] });
+describe("needsIdDocument — belge yalnız indirimli yolcudan", () => {
+  it("ücretsiz ve yarım ücretli yolcudan istenir", () => {
+    expect(needsIdDocument("FREE")).toBe(true);
+    expect(needsIdDocument("HALF")).toBe(true);
+  });
+  it("tam ücret ödeyenden istenmez", () => expect(needsIdDocument("FULL")).toBe(false));
+});
+
+describe("priceBooking — konaklamalı tur (0-3 ücretsiz, 4-6 %50, 7+ tam)", () => {
+  const base = {
+    unitPrice: 1000,
+    departureDate: DEP,
+    singleSupplement: 2000,
+    hasAccommodation: true,
+  };
+  // Belgesi yüklenmiş indirimli yolcu (indirim uygulanabilmesi için gerekir).
+  const kid = (age: number) => ({ birthDate: bornForAge(age), hasIdDocument: true });
+
+  it("2 yetişkin + 6 yaş → %50", () => {
+    const r = priceBooking({ ...base, passengers: [{}, {}, kid(6)] });
     expect(r.adultCount).toBe(2);
-    expect(r.childCount).toBe(1);
+    expect(r.halfCount).toBe(1);
     expect(r.total).toBe(1000 + 1000 + 500);
   });
 
-  it("1 yetişkin + 1 çocuk → indirim yok", () => {
-    const r = priceBooking({ ...base, passengers: [{}, child()] });
-    expect(r.total).toBe(2000);
+  it("1 yetişkin + 6 yaş → indirim yok (2+ yetişkin şartı sürüyor)", () => {
+    const r = priceBooking({ ...base, passengers: [{}, kid(6)] });
+    expect(r.halfCount).toBe(1); // hakkı var
+    expect(r.total).toBe(2000); // ama şart sağlanmadı
   });
 
-  it("bebek her zaman ücretsiz — tek yetişkinle bile", () => {
-    const r = priceBooking({ ...base, passengers: [{}, infant()] });
-    expect(r.infantCount).toBe(1);
+  it("4 yaş alt sınırı indirimli", () => {
+    const r = priceBooking({ ...base, passengers: [{}, {}, kid(4)] });
+    expect(r.total).toBe(2500);
+  });
+
+  it("7 yaş üst sınırı TAM ücret", () => {
+    const r = priceBooking({ ...base, passengers: [{}, {}, kid(7)] });
+    expect(r.halfCount).toBe(0);
+    expect(r.total).toBe(3000);
+  });
+
+  it("eski kural geçersiz: 11 yaş artık tam ücret öder", () => {
+    const r = priceBooking({ ...base, passengers: [{}, {}, kid(11)] });
+    expect(r.perPassenger[2].fareBand).toBe("FULL");
+    expect(r.total).toBe(3000);
+  });
+
+  it("3 yaş ücretsiz — tek yetişkinle bile", () => {
+    const r = priceBooking({ ...base, passengers: [{}, kid(3)] });
+    expect(r.freeCount).toBe(1);
     expect(r.perPassenger[1].fare).toBe(0);
     expect(r.total).toBe(1000);
   });
@@ -96,34 +148,21 @@ describe("priceBooking", () => {
   it("doğum tarihi yoksa yetişkin sayılır", () => {
     const r = priceBooking({ ...base, passengers: [{}, {}] });
     expect(r.adultCount).toBe(2);
-    expect(r.childCount).toBe(0);
+    expect(r.halfCount).toBe(0);
     expect(r.total).toBe(2000);
   });
 
-  it("12 yaş sınırı: tam 12 yaşında indirim yok", () => {
-    const r = priceBooking({ ...base, passengers: [{}, {}, child(12)] });
-    expect(r.childCount).toBe(0);
-    expect(r.total).toBe(3000);
-  });
-
-  it("11 yaşında çocuk indirimi var", () => {
-    const r = priceBooking({ ...base, passengers: [{}, {}, child(11)] });
-    expect(r.childCount).toBe(1);
-    expect(r.total).toBe(2500);
-  });
-
-  it("belge yüklenmemiş çocuk tam ücret öder", () => {
+  it("belge yüklenmemiş 6 yaş tam ücret öder", () => {
     const r = priceBooking({
       ...base,
       passengers: [{}, {}, { birthDate: bornForAge(6), hasIdDocument: false }],
     });
-    expect(r.childCount).toBe(1);
     expect(r.unverifiedCount).toBe(1);
     expect(r.perPassenger[2].fullFare).toBe(true);
     expect(r.total).toBe(3000);
   });
 
-  it("belge yüklenmemiş bebek tam ücret öder", () => {
+  it("belge yüklenmemiş 2 yaş tam ücret öder", () => {
     const r = priceBooking({
       ...base,
       passengers: [{}, { birthDate: bornForAge(2), hasIdDocument: false }],
@@ -165,26 +204,64 @@ describe("priceBooking", () => {
   });
 
   it("oda planı yoksa eski SINGLE davranışı korunur", () => {
-    const r = priceBooking({
-      ...base,
-      passengers: [{}],
-      accommodationType: "SINGLE",
-    });
+    const r = priceBooking({ ...base, passengers: [{}], accommodationType: "SINGLE" });
     expect(r.supplement).toBe(2000);
     expect(r.total).toBe(3000);
   });
 
-  it("2 yetişkin + çocuk + bebek: çocuk %50, bebek bedava, 2. oda tek kişilik", () => {
+  it("2 yetişkin + 6 yaş + 2 yaş: %50, ücretsiz, 2. oda tek kişilik", () => {
     const r = priceBooking({
       ...base,
-      passengers: [{}, {}, child(), infant()],
+      passengers: [{}, {}, kid(6), kid(2)],
       rooms: [3, 1],
     });
     // 1000 + 1000 + 500 + 0 = 2500, ikinci oda tek kişilik → +2000
-    expect(r.childCount).toBe(1);
-    expect(r.infantCount).toBe(1);
+    expect(r.halfCount).toBe(1);
+    expect(r.freeCount).toBe(1);
     expect(r.singleRooms).toBe(1);
     expect(r.total).toBe(2500 + 2000);
+  });
+});
+
+describe("priceBooking — günübirlik tur (0-3 ücretsiz, 4+ tam)", () => {
+  const base = {
+    unitPrice: 1000,
+    departureDate: DEP,
+    singleSupplement: 2000,
+    hasAccommodation: false,
+  };
+  const kid = (age: number) => ({ birthDate: bornForAge(age), hasIdDocument: true });
+
+  it("3 yaş ücretsiz", () => {
+    const r = priceBooking({ ...base, passengers: [{}, kid(3)] });
+    expect(r.freeCount).toBe(1);
+    expect(r.total).toBe(1000);
+  });
+
+  it("4 yaş TAM ücret — günübirlikte çocuk indirimi yok", () => {
+    const r = priceBooking({ ...base, passengers: [{}, {}, kid(4)] });
+    expect(r.halfCount).toBe(0);
+    expect(r.total).toBe(3000);
+  });
+
+  it("7 yaş tam ücret", () => {
+    const r = priceBooking({ ...base, passengers: [{}, {}, kid(7)] });
+    expect(r.total).toBe(3000);
+  });
+
+  it("aynı yolcu konaklamalıda %50, günübirlikte tam öder", () => {
+    const passengers = [{}, {}, kid(5)];
+    expect(priceBooking({ ...base, hasAccommodation: true, passengers }).total).toBe(2500);
+    expect(priceBooking({ ...base, passengers }).total).toBe(3000);
+  });
+
+  it("tam ücret ödeyen 5 yaştan belge istenmez", () => {
+    const r = priceBooking({
+      ...base,
+      passengers: [{}, { birthDate: bornForAge(5), hasIdDocument: false }],
+    });
+    expect(r.unverifiedCount).toBe(0);
+    expect(r.total).toBe(2000);
   });
 });
 

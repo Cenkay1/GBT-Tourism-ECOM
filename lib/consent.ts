@@ -7,7 +7,7 @@
 // Sözleşme metinleri (/gizlilik, /mesafeli-satis, /teslimat-iade) güncellendiğinde
 // AŞAĞIDAKİ SÜRÜM ELLE YÜKSELTİLMELİ — yoksa eski metne verilmiş rıza yeni metne
 // verilmiş gibi görünür.
-export const CONSENT_VERSION = "2026-10-11";
+export const CONSENT_VERSION = "2026-10-28";
 
 // Formdan gelen iki onay kutusunun alan adları. İstemci ve sunucu aynı adı
 // kullansın diye tek yerde tutuluyor.

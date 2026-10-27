@@ -175,8 +175,10 @@ export default function TourForm({
               Konaklamalı tur
               <span className="mt-0.5 block text-xs font-normal text-slate-400">
                 İşaretlerseniz müşteri satın alırken oda oda kişi sayısı girer
-                (yetişkin 12+, çocuk 4-12, bebek 0-3; bir odada en fazla 3 kişi) ve tek
-                kişilik kalan her oda için aşağıdaki fark eklenir.
+                (odanın sorumlu yetişkini 12+, bir odada en fazla 3 kişi) ve tek
+                kişilik kalan her oda için aşağıdaki fark eklenir. Ücret kuralı da
+                değişir: konaklamalı turda 0-3 yaş ücretsiz, 4-6 yaş %50 indirimli;
+                günübirlik turda 0-3 yaş ücretsiz, 4 yaş ve üzeri tam ücret.
               </span>
             </span>
           </label>

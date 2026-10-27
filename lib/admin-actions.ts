@@ -1051,6 +1051,9 @@ export async function cancelBookingAction(
 
   revalidatePath("/admin/rezervasyonlar");
   revalidatePath(`/admin/rezervasyonlar/${bookingId}`);
+  // İptal koltukları boşalttığı için koltuk tahtası da tazelenmeli — iptal
+  // oradaki panelden de tetiklenebiliyor.
+  revalidatePath("/admin/turlar", "layout");
   revalidatePath("/");
 
   return {

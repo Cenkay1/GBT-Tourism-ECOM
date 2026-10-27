@@ -357,7 +357,7 @@ export async function sendBookingCancellation(
       ? `<p style="font-size:14px;color:#475569;margin:12px 0 0"><strong>İade tutarı:</strong> ${formatPrice(
           opts.refundAmount,
           b.tour.currency
-        )}. Tutar bankanıza bağlı olarak 3-7 iş günü içinde kartınıza yansır.</p>`
+        )}. Tutar bankanıza bağlı olarak 7 iş günü içinde kartınıza yansır.</p>`
       : "";
 
   const html = emailShell(

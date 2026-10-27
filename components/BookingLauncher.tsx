@@ -54,34 +54,38 @@ export default function BookingLauncher({
             className="min-h-full w-full max-w-4xl bg-slate-50 shadow-xl sm:min-h-0 sm:rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Başlık */}
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 sm:rounded-t-2xl">
-              <div className="min-w-0">
-                <p className="text-xs text-slate-400">
-                  {isSeat ? "Koltuk Seçimi" : "Rezervasyon"}
-                </p>
-                <h3 className="truncate font-bold text-brand">{tour.title}</h3>
+            {/* Başlık + sefer şeridi birlikte yapışkan: müşteri koltuk
+                şemasını kaydırırken hangi seferi aldığını görmeye devam etsin
+                ve seçici şemayı aşağı itmesin. */}
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white sm:rounded-t-2xl">
+              <div className="flex items-center justify-between px-5 py-4">
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-400">
+                    {isSeat ? "Koltuk Seçimi" : "Rezervasyon"}
+                  </p>
+                  <h3 className="truncate font-bold text-brand">{tour.title}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Kapat"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Kapat"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </div>
-
-            {/* İçerik */}
-            <div className="space-y-5 p-5">
               <DepartureSelector
                 tour={tour}
                 departures={departures}
                 value={departure?.id ?? null}
                 onChange={setDepartureId}
               />
+            </div>
+
+            {/* İçerik */}
+            <div className="space-y-5 p-5">
               {!departure ? (
                 <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   Bu tur için şu anda satışa açık sefer bulunmuyor.

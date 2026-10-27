@@ -4,6 +4,11 @@ import { Tour, TourDeparture, departureSeatsLeft } from "@/lib/shared";
 
 // Sefer (kalkış tarihi) seçici. Bir turun birden çok seferi olabilir; müşteri
 // satın alırken hangi seferi aldığını burada seçer. Tek sefer varsa gösterilmez.
+//
+// Kompakt bir ŞERİT olarak çizilir ve koltuk seçiminin hemen üstüne yapışır.
+// Eskiden dikey bir kart listesiydi: mobilde ekranın tamamını doldurup koltuk
+// şemasını katlama altına itiyordu ve müşteri "Koltuk Seç"e bastığında koltuk
+// göremiyordu. Yatay şeritte hem seferler hem şema aynı anda görünür.
 export function formatDeparture(iso: string): string {
   return new Date(iso).toLocaleString("tr-TR", {
     timeZone: "Europe/Istanbul",
@@ -26,6 +31,23 @@ function formatShort(iso: string): string {
   });
 }
 
+// Şerit için kısa etiket: "Pzt 13 Kas · 08:00"
+function formatChip(iso: string): string {
+  const d = new Date(iso);
+  const day = d.toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  const time = d.toLocaleString("tr-TR", {
+    timeZone: "Europe/Istanbul",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${day} · ${time}`;
+}
+
 export default function DepartureSelector({
   tour,
   departures,
@@ -41,15 +63,19 @@ export default function DepartureSelector({
 }) {
   if (departures.length < 2) return null;
 
+  const active = departures.find((d) => d.id === value);
+
   return (
-    <div className={`rounded-2xl bg-white p-5 shadow-sm ring-1 ring-black/5 ${className}`}>
-      <h3 className="font-bold text-brand">Hangi seferi almak istiyorsunuz?</h3>
-      <p className="mt-0.5 text-xs text-slate-400">
-        Bu turun birden çok kalkış tarihi var. Her seferin koltuk düzeni ayrıdır.
+    <div className={`px-5 pb-3 ${className}`}>
+      <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        Kalkış tarihi — {departures.length} sefer
       </p>
-      <div className="mt-3 flex flex-col gap-2">
+
+      {/* Yatay kaydırılabilir: çok seferli turda satır taşmasın, şerit
+          yüksekliği sabit kalsın. */}
+      <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
         {departures.map((d) => {
-          const active = value === d.id;
+          const isActive = value === d.id;
           const left =
             tour.bookingType === "KONTENJAN" ? departureSeatsLeft(tour, d) : null;
           const full = left !== null && left <= 0;
@@ -58,41 +84,24 @@ export default function DepartureSelector({
               key={d.id}
               type="button"
               disabled={full}
+              aria-pressed={isActive}
+              title={formatDeparture(d.departureDate)}
               onClick={() => onChange(d.id)}
-              className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition ${
-                active
-                  ? "border-accent bg-accent/10"
-                  : "border-slate-200 hover:bg-slate-50"
-              } ${full ? "cursor-not-allowed opacity-50 hover:bg-transparent" : ""}`}
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-2 text-xs font-semibold transition ${
+                isActive
+                  ? "border-accent bg-accent text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-accent hover:text-accent"
+              } ${full ? "cursor-not-allowed opacity-50 hover:border-slate-200 hover:text-slate-600" : ""}`}
             >
-              <span className="flex min-w-0 items-center gap-2.5">
-                <span
-                  className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                    active ? "border-accent" : "border-slate-300"
-                  }`}
-                >
-                  {active && <span className="h-2.5 w-2.5 rounded-full bg-accent" />}
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-slate-700">
-                    {formatDeparture(d.departureDate)}
-                  </span>
-                  {d.returnDate && (
-                    <span className="block text-xs text-slate-400">
-                      Dönüş: {formatShort(d.returnDate)}
-                    </span>
-                  )}
-                  {d.bus && (
-                    <span className="block text-xs text-slate-400">
-                      Araç: {d.bus.plate}
-                    </span>
-                  )}
-                </span>
-              </span>
+              {formatChip(d.departureDate)}
               {left !== null && (
                 <span
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                    full ? "bg-slate-100 text-slate-400" : "bg-emerald-50 text-emerald-700"
+                  className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : full
+                      ? "bg-slate-100 text-slate-400"
+                      : "bg-emerald-50 text-emerald-700"
                   }`}
                 >
                   {full ? "Doldu" : `${left} yer`}
@@ -102,6 +111,16 @@ export default function DepartureSelector({
           );
         })}
       </div>
+
+      {/* Seçili seferin ayrıntısı: şeritte yer olmayan dönüş ve araç bilgisi
+          kaybolmasın diye tek satırda altta. */}
+      {active && (active.returnDate || active.bus) && (
+        <p className="mt-1 text-[11px] text-slate-400">
+          {active.returnDate && <>Dönüş: {formatShort(active.returnDate)}</>}
+          {active.returnDate && active.bus && " · "}
+          {active.bus && <>Araç: {active.bus.plate}</>}
+        </p>
+      )}
     </div>
   );
 }

@@ -101,9 +101,9 @@ export default function CapacityBooking({
 
       {accommodation && (
         <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-          Konaklamalı tur: oda dağılımını bir sonraki adımda yaparsınız. Çocuk (4-12)
-          indirimi ve bebek (0-3) ücretsizliği, yolcu doğum tarihlerine göre orada
-          otomatik uygulanır.
+          Konaklamalı tur: oda dağılımını bir sonraki adımda yaparsınız. 0-3 yaş
+          ücretsiz, 4-6 yaş %50 indirimli (rezervasyonda en az 2 yetişkin olmak
+          şartıyla) — yolcu doğum tarihlerine göre orada otomatik uygulanır.
         </p>
       )}
 

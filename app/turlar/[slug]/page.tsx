@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import BookingLauncher from "@/components/BookingLauncher";
+import MobileBookingBar from "@/components/MobileBookingBar";
 import TourRouteMap from "@/components/TourRouteMap";
 import {
   getTourBySlug,
@@ -69,7 +70,7 @@ export default async function TourDetail({
   const boardingPlaces = (tour.places ?? []).filter((p) => p.type === "BINIS");
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6">
+    <div className="mx-auto max-w-6xl px-4 py-6 pb-28 md:pb-6">
       {(hata || iptal) && (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           {hata ?? "Ödeme tamamlanmadı, işlem iptal edildi. Dilerseniz tekrar deneyebilirsiniz."}
@@ -359,6 +360,9 @@ export default async function TourDetail({
           departure={tour.departureLocation}
         />
       </div>
+
+      {/* Mobilde ekranın altına yapışan satın alma şeridi (masaüstünde gizli). */}
+      <MobileBookingBar tour={tour} />
     </div>
   );
 }

@@ -41,3 +41,27 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Yazdırma: sayfadaki her şey gizlenir, yalnız .print-area içeriği basılır.
+   Rezervasyon başarı ekranındaki "Bilgileri İndir" bu mekanizmayı kullanır —
+   müşteri tarayıcının "PDF olarak kaydet" seçeneğiyle belgeyi indirir, böylece
+   projeye PDF üretim kütüphanesi girmez. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    padding: 16px;
+    width: 100%;
+  }
+  .print-hidden {
+    display: none !important;
+  }
+}

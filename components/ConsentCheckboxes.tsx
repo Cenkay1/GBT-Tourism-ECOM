@@ -105,7 +105,8 @@ export default function ConsentCheckboxes({
             </p>
             <p>
               <strong className="text-slate-700">İade süresi:</strong> Onaylanan iadeler
-              kartınıza bankanıza bağlı olarak 3-7 iş günü içinde yansır.
+              kartınıza bankanıza bağlı olarak 7 iş günü içinde yansır; sözleşmeden
+              doğan yasal azami süre 14 gündür.
             </p>
             <p className="pt-1 text-slate-400">
               Bu bir özettir; bağlayıcı hükümler{" "}

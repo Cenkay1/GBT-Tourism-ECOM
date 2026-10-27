@@ -18,7 +18,18 @@ export default function Header({ account }: { account?: React.ReactNode }) {
   return (
     <header className="sticky top-0 z-40 bg-white shadow-sm">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-        <Link href="/" className="flex items-center" onClick={() => setOpen(false)}>
+        {/* Logo ana sayfanın EN ÜSTÜNE götürür. Sadece href="/" yetmiyor:
+            zaten ana sayfadayken Next yönlendirme yapmaz ve sayfa bulunduğu
+            kaydırma konumunda kalır. */}
+        <Link
+          href="/"
+          className="flex items-center"
+          onClick={() => {
+            setOpen(false);
+            if (window.location.pathname === "/")
+              window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/logo.png"

@@ -629,6 +629,50 @@ export function validateRooms(rooms: RoomPlan, bands?: AgeBand[]): string | null
   return null;
 }
 
+// --- Ücret bandı ---
+// "Yaş grubu" (AgeBand) ile "ücret bandı" (FareBand) KASITLI OLARAK ayrı:
+//   · AgeBand odalamayı ve kayıtları yönetir — bir odanın sorumlu yetişkini
+//     12+ olmalıdır ve bu tur tipine göre değişmez.
+//   · FareBand parayı yönetir ve tur tipine GÖRE DEĞİŞİR:
+//       konaklamalı  → 0-3 ücretsiz, 4-6 %50, 7+ tam
+//       günübirlik   → 0-3 ücretsiz, 4+ tam
+// İkisi tek bir bandda birleştirilseydi, konaklamalıda 7 yaşındaki bir çocuk
+// "yetişkin" sayılıp bir odanın sorumlusu yapılabilirdi.
+export type FareBand = "FREE" | "HALF" | "FULL";
+
+export const FARE_FREE_MAX_AGE = 3; // 0-3: iki tur tipinde de ücretsiz
+export const ACCOMMODATION_HALF_MAX_AGE = 6; // konaklamalı: 4-6 arası %50
+
+export function fareBandForAge(age: number, hasAccommodation: boolean): FareBand {
+  if (age <= FARE_FREE_MAX_AGE) return "FREE";
+  if (hasAccommodation && age <= ACCOMMODATION_HALF_MAX_AGE) return "HALF";
+  return "FULL";
+}
+
+// Doğum tarihi yoksa tam ücret — yaş indirimi uydurulmaz.
+export function passengerFareBand(
+  p: { birthDate?: string | null },
+  departureDate: string,
+  hasAccommodation: boolean
+): FareBand {
+  if (!p.birthDate) return "FULL";
+  return fareBandForAge(ageOn(p.birthDate, departureDate), hasAccommodation);
+}
+
+export function fareBandLabel(b: FareBand): string {
+  if (b === "FREE") return "Ücretsiz";
+  if (b === "HALF") return "%50 indirimli";
+  return "Tam ücret";
+}
+
+export function fareBandAgeText(b: FareBand, hasAccommodation: boolean): string {
+  if (b === "FREE") return `0-${FARE_FREE_MAX_AGE} yaş`;
+  if (b === "HALF") return `${FARE_FREE_MAX_AGE + 1}-${ACCOMMODATION_HALF_MAX_AGE} yaş`;
+  return hasAccommodation
+    ? `${ACCOMMODATION_HALF_MAX_AGE + 1}+ yaş`
+    : `${FARE_FREE_MAX_AGE + 1}+ yaş`;
+}
+
 export interface PricePassenger {
   birthDate?: string | null;
   // Yaş doğrulama belgesi (kimlik fotoğrafı) yüklendi mi? Çocuk indirimi ve
@@ -639,18 +683,31 @@ export interface PricePassenger {
 export interface PriceResult {
   total: number;
   // fullFare: yaş indirimi uygulanmadı (belge yok) → tam ücret alındı.
-  perPassenger: { fare: number; isChild: boolean; band: AgeBand; fullFare: boolean }[];
-  childCount: number;
+  perPassenger: {
+    fare: number;
+    isChild: boolean;
+    band: AgeBand; // odalama/kayıt grubu
+    fareBand: FareBand; // bu turda hangi ücreti ödüyor
+    fullFare: boolean;
+  }[];
+  childCount: number; // AgeBand sayıları — oda özeti için
   infantCount: number;
   adultCount: number;
+  freeCount: number; // ücretsiz yolcu sayısı (FareBand)
+  halfCount: number; // %50 hakkı olan yolcu sayısı (FareBand)
   supplement: number;
   singleRooms: number; // tek kişilik konaklanan oda sayısı
   unverifiedCount: number; // belge beklendiği için tam ücret alınan yolcu sayısı
 }
 
-// Bu yolcu için yaş doğrulama belgesi gerekiyor mu? (yalnız çocuk ve bebek)
-export function needsIdDocument(band: AgeBand): boolean {
-  return band !== "ADULT";
+// Bu yolcu için yaş doğrulama belgesi gerekiyor mu?
+//
+// Belge, yaş indiriminin İSPATI için isteniyor — dolayısıyla yalnız indirim
+// alan yolcudan istenir. Yaş grubuna değil ÜCRET bandına bakılır: günübirlik
+// turda 9 yaşındaki bir yolcu "çocuk" ama tam ücret ödüyor, ondan belge
+// istemek karşılığı olmayan bir sürtünme olurdu.
+export function needsIdDocument(band: FareBand): boolean {
+  return band !== "FULL";
 }
 
 // Bir yolcunun yaş bandı YALNIZCA doğum tarihinden hesaplanır — ayrıca yaş
@@ -664,35 +721,51 @@ export function passengerBand(
 }
 
 // Rezervasyon tutarını hesaplar (saf; hem istemci hem sunucu kullanır).
-// Yetişkin (12+): tam ücret. Çocuk (4-12): rezervasyonda >=2 yetişkin varsa %50.
-// Bebek (0-3): her zaman ücretsiz.
+//
+// Ücret kuralı tur tipine göre değişir (bkz. FareBand):
+//   konaklamalı → 0-3 ücretsiz, 4-6 %50 (rezervasyonda 2+ yetişkin şartıyla), 7+ tam
+//   günübirlik  → 0-3 ücretsiz, 4+ tam
 // Konaklamalı turda tek kişi kalan her oda için tek kişilik farkı eklenir.
+//
+// hasAccommodation İSTEĞE BAĞLI DEĞİL: unutulduğunda sessizce günübirlik
+// kuralına düşmek, konaklamalı turda 4-6 yaş çocuktan fazla para almak
+// demektir. Derleyici her çağıranı karar vermeye zorlasın.
 export function priceBooking(input: {
   unitPrice: number;
   departureDate: string;
+  hasAccommodation: boolean; // konaklamalı tur mu (ücret kuralını belirler)
   passengers: PricePassenger[];
   rooms?: RoomPlan; // konaklamalı turda oda planı (oda başına kişi sayısı)
   accommodationType?: "SINGLE" | "MULTI" | null; // oda dağılımı yoksa eski davranış
   singleSupplement?: number;
 }): PriceResult {
-  const { unitPrice, departureDate, passengers } = input;
+  const { unitPrice, departureDate, passengers, hasAccommodation } = input;
   const bands = passengers.map((p) => passengerBand(p, departureDate));
+  const fareBands = passengers.map((p) =>
+    passengerFareBand(p, departureDate, hasAccommodation)
+  );
   const adultCount = bands.filter((b) => b === "ADULT").length;
   const discount = adultCount >= CHILD_DISCOUNT_MIN_ADULTS;
-  const childFare = Math.round(unitPrice * CHILD_DISCOUNT);
+  const halfFare = Math.round(unitPrice * CHILD_DISCOUNT);
 
-  const perPassenger = bands.map((band, i) => {
-    // Yaş indirimi belgeye bağlıdır: çocuk/bebek için kimlik belgesi
-    // yüklenmediyse yolcu tam ücret öder.
-    const missingDoc = needsIdDocument(band) && passengers[i].hasIdDocument === false;
+  const perPassenger = fareBands.map((fareBand, i) => {
+    // Yaş indirimi belgeye bağlıdır: indirimli yolcu için kimlik belgesi
+    // yüklenmediyse tam ücret öder.
+    const missingDoc = needsIdDocument(fareBand) && passengers[i].hasIdDocument === false;
     const fare = missingDoc
       ? unitPrice
-      : band === "INFANT"
+      : fareBand === "FREE"
       ? 0
-      : band === "CHILD" && discount
-      ? childFare
+      : fareBand === "HALF" && discount
+      ? halfFare
       : unitPrice;
-    return { band, isChild: band === "CHILD", fare, fullFare: missingDoc };
+    return {
+      band: bands[i],
+      fareBand,
+      isChild: fareBand === "HALF",
+      fare,
+      fullFare: missingDoc,
+    };
   });
   const base = perPassenger.reduce((s, p) => s + p.fare, 0);
 
@@ -712,6 +785,8 @@ export function priceBooking(input: {
     childCount: bands.filter((b) => b === "CHILD").length,
     infantCount: bands.filter((b) => b === "INFANT").length,
     adultCount,
+    freeCount: fareBands.filter((b) => b === "FREE").length,
+    halfCount: fareBands.filter((b) => b === "HALF").length,
     supplement,
     singleRooms,
     unverifiedCount: perPassenger.filter((p) => p.fullFare).length,
