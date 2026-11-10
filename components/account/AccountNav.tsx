@@ -7,11 +7,13 @@ import {
   TicketIcon,
   StarIcon,
   UserIcon,
+  UsersIcon,
 } from "@/components/Icons";
 
 const items = [
   { href: "/hesabim", label: "Panel", Icon: DashboardIcon, exact: true },
   { href: "/hesabim/rezervasyonlarim", label: "Rezervasyonlarım", Icon: TicketIcon },
+  { href: "/hesabim/kisilerim", label: "Kişilerim", Icon: UsersIcon },
   { href: "/hesabim/puanlarim", label: "Puanlarım", Icon: StarIcon },
   { href: "/hesabim/profil", label: "Profil", Icon: UserIcon },
 ];

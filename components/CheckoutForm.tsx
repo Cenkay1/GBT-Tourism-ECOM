@@ -23,6 +23,7 @@ import {
   assignRooms,
   validateRooms,
   needsIdDocument,
+  HOLD_MINUTES,
   depositFor,
   balanceDueDateFor,
   formatDate,
@@ -30,6 +31,7 @@ import {
   ROOM_MAX_GUESTS,
 } from "@/lib/shared";
 import { COUNTRIES } from "@/lib/countries";
+import type { SavedPassengerView } from "@/lib/saved-passengers";
 import RoomsEditor, { packRooms } from "@/components/RoomsEditor";
 import IdDocumentUpload from "@/components/IdDocumentUpload";
 
@@ -74,6 +76,7 @@ export default function CheckoutForm({
   currency,
   depositPercent = 0,
   balanceDueDays = 5,
+  savedPassengers = [],
 }: {
   tour: CheckoutTour;
   seats: SeatPick[];
@@ -97,6 +100,9 @@ export default function CheckoutForm({
   // Ön satış: oran 0 ise ödeme planı seçimi gösterilmez (yalnız peşin).
   depositPercent?: number;
   balanceDueDays?: number;
+  // Giriş yapmış müşterinin hesabına kaydettiği kişiler. Boşsa seçici
+  // gösterilmez (misafir alışverişi eskisi gibi çalışır).
+  savedPassengers?: SavedPassengerView[];
 }) {
   const isSeat = tour.bookingType === "KOLTUK";
   const count = isSeat ? seats.length : quantity;
@@ -125,6 +131,49 @@ export default function CheckoutForm({
   // için zorunlu; yüklenmezse o yolcu tam ücret öder.
   const [docs, setDocs] = useState<string[]>(Array.from({ length: count }, () => ""));
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Ad / soyad / kimlik no KONTROLLÜ alanlar: kayıtlı kişi seçildiğinde
+  // programatik olarak doldurulmaları gerekiyor. (Önceden defaultValue ile
+  // kontrolsüzdüler; o hâlde seçim alanları değiştiremezdi.)
+  const [firsts, setFirsts] = useState<string[]>(Array.from({ length: count }, () => ""));
+  const [lasts, setLasts] = useState<string[]>(Array.from({ length: count }, () => ""));
+  const [ids, setIds] = useState<string[]>(Array.from({ length: count }, () => ""));
+  // Hangi yolcu hangi kayıtlı kişiden dolduruldu (seçici göstergesi) ve
+  // hangileri hesaba kaydedilecek.
+  const [pickedIds, setPickedIds] = useState<string[]>(
+    Array.from({ length: count }, () => "")
+  );
+  const [saveToAccount, setSaveToAccount] = useState<boolean[]>(
+    Array.from({ length: count }, () => false)
+  );
+
+  // Dizi state'inde tek öğeyi değiştiren yardımcı. NoInfer: T YALNIZCA
+  // setter'dan çıkarılsın — aksi halde dar bir değer (örn. "E") geçildiğinde
+  // TypeScript T'yi ondan türetip setter'ın kendi tipiyle çakışıyor.
+  const setAt = <T,>(
+    setter: React.Dispatch<React.SetStateAction<T[]>>,
+    i: number,
+    value: NoInfer<T>
+  ) => setter((prev) => prev.map((x, idx) => (idx === i ? (value as T) : x)));
+
+  // Kayıtlı kişiyi yolcu satırına uygula. Boş alanlar ezilmez: müşteri
+  // seçimden sonra elle düzeltme yapabilir ve kayıtta olmayan bir bilgi
+  // (ör. cinsiyet) formda girdiği değeri korur.
+  function applySaved(i: number, personId: string) {
+    setAt(setPickedIds, i, personId);
+    if (!personId) return;
+    const p = savedPassengers.find((x) => x.id === personId);
+    if (!p) return;
+    setAt(setFirsts, i, p.firstName);
+    setAt(setLasts, i, p.lastName);
+    if (p.idNumber) setAt(setIds, i, p.idNumber);
+    if (p.birthDate) setAt(setBirths, i, p.birthDate);
+    if (p.gender && !isSeat) setAt(setGenders, i, p.gender);
+    setAt(setNats, i, p.nationality);
+    if (p.country) setAt(setCountries, i, p.country);
+    // Zaten kayıtlı: tekrar kaydetme kutusunu işaretli tutmanın anlamı yok.
+    setAt(setSaveToAccount, i, false);
+  }
 
   // Yolcunun yaş grubu TEK KAYNAKTAN gelir: girilen doğum tarihi. Ayrıca yaş
   // grubu seçilmez; tarih girilmediyse yetişkin (tam ücret) sayılır. Çocuk veya
@@ -254,6 +303,15 @@ export default function CheckoutForm({
         name="odemePlani"
         value={effectivePlan === "DEPOSIT" ? "ON_ODEME" : "PESIN"}
       />
+      {/* Hangi yolcuların hesaba kaydedileceği — sunucu bu listeye göre kaydeder. */}
+      <input
+        type="hidden"
+        name="kisileriKaydet"
+        value={saveToAccount
+          .map((v, i) => (v ? String(i) : ""))
+          .filter(Boolean)
+          .join(",")}
+      />
       {docs.map((d, i) => (
         <input key={`d${i}`} type="hidden" name={`p_${i}_doc`} value={d} />
       ))}
@@ -348,6 +406,34 @@ export default function CheckoutForm({
                     {errors[`p_${i}_gender`]}
                   </p>
                 )}
+
+                {/* Kayıtlı kişiler — yalnız giriş yapmış ve kaydı olan müşteride */}
+                {savedPassengers.length > 0 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                    <label className="text-xs font-medium text-slate-500">
+                      Kayıtlı kişi:
+                    </label>
+                    <select
+                      value={pickedIds[i] ?? ""}
+                      onChange={(e) => applySaved(i, e.target.value)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-brand"
+                    >
+                      <option value="">Seçin ve bilgiler dolsun</option>
+                      {savedPassengers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.isSelf ? "★ " : ""}
+                          {p.firstName} {p.lastName}
+                          {p.label ? ` (${p.label})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {pickedIds[i] && (
+                      <span className="text-xs text-emerald-700">
+                        Bilgiler dolduruldu — gerekirse düzeltebilirsiniz.
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="mb-3 flex flex-wrap items-center gap-2">
                   <span className="text-xs font-medium text-slate-500">Uyruk:</span>
                   {([["TC", "T.C. Vatandaşı"], ["FOREIGN", "Yabancı Uyruklu"]] as const).map(([val, lbl]) => (
@@ -382,8 +468,24 @@ export default function CheckoutForm({
                   <p className="mb-2 text-xs text-red-600">{errors[`p_${i}_country`]}</p>
                 )}
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <Field name={`p_${i}_first`} labelText="Ad *" input={input} label={label} error={errors[`p_${i}_first`]} />
-                  <Field name={`p_${i}_last`} labelText="Soyad *" input={input} label={label} error={errors[`p_${i}_last`]} />
+                  <Field
+                    name={`p_${i}_first`}
+                    labelText="Ad *"
+                    input={input}
+                    label={label}
+                    error={errors[`p_${i}_first`]}
+                    value={firsts[i] ?? ""}
+                    onValueChange={(v) => setAt(setFirsts, i, v)}
+                  />
+                  <Field
+                    name={`p_${i}_last`}
+                    labelText="Soyad *"
+                    input={input}
+                    label={label}
+                    error={errors[`p_${i}_last`]}
+                    value={lasts[i] ?? ""}
+                    onValueChange={(v) => setAt(setLasts, i, v)}
+                  />
                   <Field
                     name={`p_${i}_id`}
                     labelText={nats[i] === "FOREIGN" ? "Pasaport No *" : "TC Kimlik No *"}
@@ -392,6 +494,8 @@ export default function CheckoutForm({
                     error={errors[`p_${i}_id`]}
                     inputMode={nats[i] === "FOREIGN" ? "text" : "numeric"}
                     maxLength={nats[i] === "FOREIGN" ? 15 : 11}
+                    value={ids[i] ?? ""}
+                    onValueChange={(v) => setAt(setIds, i, v)}
                   />
                 </div>
                 <div className="mt-3">
@@ -444,6 +548,27 @@ export default function CheckoutForm({
                     bandLabel={bandLabel(effectiveBand(i))}
                     error={errors[`p_${i}_doc`]}
                   />
+                )}
+
+                {/* Hesaba kaydet — yalnız giriş yapmış müşteride ve kişi
+                    listeden seçilmediyse (seçilen kişi zaten kayıtlı). */}
+                {loggedIn && !pickedIds[i] && (
+                  <label className="mt-3 flex items-start gap-2.5 text-xs leading-relaxed text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={saveToAccount[i] ?? false}
+                      onChange={(e) => setAt(setSaveToAccount, i, e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer accent-accent"
+                    />
+                    <span>
+                      Bu kişiyi hesabıma kaydet
+                      <span className="mt-0.5 block text-[11px] text-slate-400">
+                        Sonraki rezervasyonlarınızda listeden seçip bilgileri otomatik
+                        doldurabilirsiniz. Hesabım → Kişilerim&apos;den dilediğiniz zaman
+                        silebilirsiniz.
+                      </span>
+                    </span>
+                  </label>
                 )}
               </div>
             ))}
@@ -626,7 +751,8 @@ export default function CheckoutForm({
           </p>
         )}
         <p className="mt-2 text-center text-[11px] text-slate-400">
-          Koltuklarınız ödeme tamamlanana kadar 15 dk süreyle size ayrılır.
+          Koltuklarınız ödeme tamamlanana kadar {HOLD_MINUTES} dk süreyle size ayrılır.
+          Ödemeden vazgeçerseniz hemen serbest bırakılır.
         </p>
       </aside>
     </form>
@@ -674,6 +800,11 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// Hem kontrollü hem kontrolsüz kullanılabilen alan.
+//
+// Kayıtlı kişi seçimiyle programatik doldurulan alanlar (ad, soyad, kimlik no)
+// `value` + `onValueChange` ile kontrollü çalışır; iletişim alanları eskisi
+// gibi `defaultValue` ile kontrolsüz kalır. İkisi aynı anda verilmez.
 function Field({
   name,
   labelText,
@@ -685,6 +816,8 @@ function Field({
   inputMode,
   maxLength,
   defaultValue,
+  value,
+  onValueChange,
 }: {
   name: string;
   labelText: string;
@@ -696,7 +829,10 @@ function Field({
   inputMode?: "text" | "numeric" | "tel" | "email";
   maxLength?: number;
   defaultValue?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
 }) {
+  const controlled = value !== undefined && onValueChange !== undefined;
   return (
     <label className={label}>
       {labelText}
@@ -706,7 +842,9 @@ function Field({
         placeholder={placeholder}
         inputMode={inputMode}
         maxLength={maxLength}
-        defaultValue={defaultValue}
+        {...(controlled
+          ? { value, onChange: (e) => onValueChange!(e.target.value) }
+          : { defaultValue })}
         data-error={error ? "1" : undefined}
         className={`${input} ${error ? "border-red-400" : ""}`}
       />

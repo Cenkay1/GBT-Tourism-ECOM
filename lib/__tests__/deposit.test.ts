@@ -328,3 +328,101 @@ describe("releaseUnpaidBalances", () => {
     ).toBe("ODENDI");
   });
 });
+
+describe("koltuk kilidi", () => {
+  it("ödeme tamamlanmayan rezervasyonun koltuğu kilit süresi dolunca serbest kalır", async () => {
+    const { bookingId, tourId } = await createTestBooking(prisma, {
+      status: "BEKLIYOR",
+      seatCodes: ["2A"],
+    });
+    // Kilit süresi geçmiş gibi davran.
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: { holdExpiresAt: new Date(Date.now() - 60_000) },
+    });
+
+    const { releaseExpiredHolds } = await import("@/lib/booking");
+    await releaseExpiredHolds();
+
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: bookingId } })).status
+    ).toBe("SURE_DOLDU");
+    expect(
+      await prisma.seat.count({ where: { tourId, status: { not: "BOS" } } })
+    ).toBe(0);
+  });
+
+  it("vazgeçilen ödemede koltuk süre beklemeden bırakılır, ödenmiş koltuğa dokunulmaz", async () => {
+    const { cancelBooking } = await import("@/lib/booking");
+
+    // Henüz ödenmemiş: koltuk hemen boşa çıkmalı.
+    const bekleyen = await createTestBooking(prisma, {
+      status: "BEKLIYOR",
+      seatCodes: ["3A"],
+    });
+    await cancelBooking(bekleyen.bookingId);
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: bekleyen.bookingId } })).status
+    ).toBe("IPTAL");
+    expect(
+      await prisma.seat.count({ where: { tourId: bekleyen.tourId, status: { not: "BOS" } } })
+    ).toBe(0);
+
+    // Ödenmiş rezervasyon: aynı çağrı koltuğu ASLA boşaltmamalı — aksi halde
+    // iyzico'nun tekrar gönderdiği bir callback satılmış koltuğu açardı.
+    const odenmis = await createTestBooking(prisma, {
+      status: "ODENDI",
+      seatCodes: ["3A"],
+    });
+    await cancelBooking(odenmis.bookingId);
+    expect(
+      (await prisma.booking.findUniqueOrThrow({ where: { id: odenmis.bookingId } })).status
+    ).toBe("ODENDI");
+    expect(
+      await prisma.seat.count({ where: { tourId: odenmis.tourId, status: "SATILDI" } })
+    ).toBe(1);
+  });
+});
+
+describe("bakiye bildirimi", () => {
+  it("elden satışta eksik tahsilat girilince müşteriye bakiye bildirimi gider", async () => {
+    const { sendBalanceStatement } = await import("@/lib/notifications");
+    const notify = await import("@/lib/notify");
+
+    const { bookingId } = await createTestBooking(prisma, {
+      status: "ODENDI",
+      totalAmount: 4000,
+      paidAmount: 1000,
+    });
+    await prisma.booking.update({
+      where: { id: bookingId },
+      data: { balanceDueAt: new Date(Date.now() + 5 * 86400000), balanceToken: "tok-test" },
+    });
+
+    vi.mocked(notify.sendEmail).mockClear();
+    await sendBalanceStatement(bookingId);
+
+    expect(notify.sendEmail).toHaveBeenCalledTimes(1);
+    const [, subject, html] = vi.mocked(notify.sendEmail).mock.calls[0];
+    // Konu satırı kalan tutarı taşımalı — müşteri açmadan görsün.
+    expect(subject).toMatch(/Kalan/i);
+    // Gövdede kalan tutar, son ödeme tarihi ve ödeme bağlantısı bulunmalı.
+    expect(html).toMatch(/Kalan ödemeniz/);
+    expect(html).toMatch(/Son ödeme tarihi/);
+    expect(html).toMatch(/kalan-odeme\/tok-test/);
+  });
+
+  it("bakiyesi kapalı rezervasyonda bakiye bildirimi gönderilmez", async () => {
+    const { sendBalanceStatement } = await import("@/lib/notifications");
+    const notify = await import("@/lib/notify");
+
+    const { bookingId } = await createTestBooking(prisma, {
+      status: "ODENDI",
+      totalAmount: 2000,
+    });
+
+    vi.mocked(notify.sendEmail).mockClear();
+    await sendBalanceStatement(bookingId);
+    expect(notify.sendEmail).not.toHaveBeenCalled();
+  });
+});

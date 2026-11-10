@@ -12,6 +12,7 @@ import {
   depositFor,
   balanceDueDateFor,
   formatDate,
+  HOLD_MINUTES,
 } from "@/lib/shared";
 
 interface PassRow {
@@ -451,7 +452,7 @@ export default function AdminSaleForm({
             yukarıda girdiğiniz <strong>{formatPrice(shownCollected, tour.currency)}</strong>{" "}
             çekilir. Ödeme tamamlanınca rezervasyon “Ödendi” olur ve müşteriye onay gider.
             İyzico için müşterinin geçerli e-posta ve cep telefonu zorunludur. Koltuklar
-            ödeme için 15 dakika kilitli kalır.
+            ödeme için {HOLD_MINUTES} dakika kilitli kalır.
           </p>
         )}
       </div>

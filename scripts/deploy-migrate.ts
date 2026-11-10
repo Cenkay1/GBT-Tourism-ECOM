@@ -278,6 +278,34 @@ async function main() {
     console.log("  = HotelInquiry tablosu zaten var");
   }
 
+  // Kayıtlı yolcular (müşterinin hesabına kaydettiği kişiler).
+  if (!(await tableExists("SavedPassenger"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "SavedPassenger" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "userId" TEXT NOT NULL,
+        "firstName" TEXT NOT NULL,
+        "lastName" TEXT NOT NULL,
+        "idNumber" TEXT,
+        "birthDate" DATETIME,
+        "gender" TEXT,
+        "nationality" TEXT NOT NULL DEFAULT 'TC',
+        "country" TEXT,
+        "label" TEXT NOT NULL DEFAULT '',
+        "isSelf" BOOLEAN NOT NULL DEFAULT false,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "SavedPassenger_userId_fkey" FOREIGN KEY ("userId")
+          REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX "SavedPassenger_userId_idx" ON "SavedPassenger"("userId")`
+    );
+    console.log("  + SavedPassenger tablosu");
+  } else {
+    console.log("  = SavedPassenger tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {

@@ -5,6 +5,7 @@ import { Gender } from "@/lib/shared";
 import { submitCheckout } from "@/lib/checkout-actions";
 import CheckoutForm from "@/components/CheckoutForm";
 import { getCurrentUser } from "@/lib/session";
+import { listSavedPassengers } from "@/lib/saved-passengers";
 import { earnedFor } from "@/lib/loyalty";
 
 export const dynamic = "force-dynamic";
@@ -78,6 +79,9 @@ export default async function CheckoutPage({
 
   // Giriş yapan müşteri: iletişim alanlarını ön-doldur + kazanılacak puanı göster.
   const user = await getCurrentUser();
+  // Hesabına kaydettiği kişiler — yolcu satırlarında listeden seçip
+  // bilgileri otomatik doldurabilsin. Misafir alışverişinde boş dizi.
+  const savedPassengers = user ? await listSavedPassengers(user.id) : [];
   const earnPoints = earnedFor(total);
   const selfParams = new URLSearchParams({ tur: tur! });
   if (koltuklar) selfParams.set("koltuklar", koltuklar);
@@ -126,6 +130,7 @@ export default async function CheckoutPage({
           currency={tour.currency}
           depositPercent={tour.depositPercent ?? 0}
           balanceDueDays={tour.balanceDueDays ?? 5}
+          savedPassengers={savedPassengers}
           defaults={
             user
               ? {

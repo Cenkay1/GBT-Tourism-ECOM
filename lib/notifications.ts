@@ -732,3 +732,70 @@ export async function sendHotelInquiryNotice(inquiryId: string): Promise<boolean
     html
   );
 }
+
+// --- Ödeme durumu bildirimi (ön ödeme / kısmi tahsilat) -------------------
+//
+// "Şu kadar ödendi, şu kadar kaldı, şu tarihe kadar ödenmeli" bildirimi.
+// Nerede kullanılır:
+//   • Elden satışta görevli toplamın bir kısmını tahsil ettiğinde
+//   • Panelden sonradan tahsilat girildiğinde (bakiye hâlâ açıksa)
+// Bakiye kapandığında bu DEĞİL, sendBalanceCompleted gönderilir.
+//
+// Elden satışta müşterinin e-postası zorunlu olmadığı için adres boşsa yalnız
+// SMS gider; ikisi de yoksa sessizce çıkar (satışı bloklamaz).
+export async function sendBalanceStatement(bookingId: string): Promise<void> {
+  const b = (await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      tour: { include: { bus: true } },
+      departure: { include: { bus: true } },
+      boardingPlace: { select: { name: true, boardingTime: true } },
+      passengers: true,
+    },
+  })) as BookingWithTour | null;
+  if (!b) return;
+
+  const balance = balanceAmount(b);
+  if (balance <= 0) return;
+
+  const due = b.balanceDueAt ? fmtDate(b.balanceDueAt) : null;
+  const jobs: Promise<unknown>[] = [];
+
+  if (b.contactPhone) {
+    jobs.push(
+      sendSms(
+        b.contactPhone,
+        `${COMPANY}\nÖdemeniz alındı, teşekkürler.\n` +
+          `${b.tour.title}\nKalkış: ${fmtDateTime(depDate(b))}\n` +
+          `Ödenen: ${formatPrice(b.paidAmount, b.tour.currency)}\n` +
+          `Kalan: ${formatPrice(balance, b.tour.currency)}\n` +
+          `${due ? `Son ödeme: ${due}\n` : ""}` +
+          `Rez. No: ${ref(b)}`
+      )
+    );
+  }
+
+  if (b.contactEmail) {
+    const html = emailShell(
+      "Ödemeniz alındı — kalan tutar bilgisi",
+      `<p style="font-size:14px;color:#475569">Sayın ${escapeHtml(b.contactName)},
+         ödemeniz tarafımıza ulaştı. Rezervasyonunuzun güncel ödeme durumu aşağıdadır.</p>
+       ${balanceBlock(b)}
+       ${detailsTable(b)}
+       ${termsBlock()}
+       <p style="font-size:14px;color:#475569;margin-top:16px">
+         Sorularınız için ${COMPANY_INFO.phones[0]} numarasından veya
+         ${COMPANY_INFO.emails[0]} adresinden bize ulaşabilirsiniz.
+       </p>`
+    );
+    jobs.push(
+      sendEmail(
+        b.contactEmail,
+        `${COMPANY} — Ödemeniz Alındı, Kalan: ${formatPrice(balance, b.tour.currency)} (${ref(b)})`,
+        html
+      )
+    );
+  }
+
+  await Promise.allSettled(jobs);
+}

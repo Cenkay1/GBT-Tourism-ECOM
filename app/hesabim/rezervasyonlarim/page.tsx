@@ -2,12 +2,33 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getCurrentUser } from "@/lib/session";
 import { getUserBookings } from "@/lib/account";
+import { linkGuestBookings } from "@/lib/loyalty";
 import BookingRow from "@/components/account/BookingRow";
 
 export const metadata: Metadata = { title: "Rezervasyonlarım" };
+export const dynamic = "force-dynamic";
 
 export default async function MyBookingsPage() {
   const user = (await getCurrentUser())!;
+
+  // Aynı e-postayla MİSAFİR olarak yapılmış rezervasyonları hesaba bağla.
+  //
+  // Bu eşleştirme kayıt, e-posta doğrulama ve Google'la ilk girişte de
+  // çalışıyor; ama o anlardan SONRA misafir olarak yapılan bir rezervasyon
+  // hiçbir zaman hesaba düşmüyordu (hesabı olan müşteri çıkış yapıp ya da
+  // tanınmadan rezervasyon yaptığında). Liste her açıldığında tekrar
+  // denemek bu boşluğu kapatıyor; işlem idempotenttir.
+  //
+  // YALNIZCA doğrulanmış e-postalar: aksi halde biri başkasının e-posta
+  // adresiyle hesap açıp o kişinin rezervasyonlarını (yolcu adları, kimlik
+  // bilgileri) görüntüleyebilirdi.
+  if (user.emailVerified) {
+    await linkGuestBookings(user.id, user.email).catch(() => {
+      // Bağlama başarısız olursa liste yine gösterilir; bir sonraki
+      // açılışta tekrar denenir.
+    });
+  }
+
   const bookings = await getUserBookings(user.id);
 
   return (

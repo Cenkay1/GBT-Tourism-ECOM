@@ -59,6 +59,14 @@ export async function submitCheckout(fd: FormData) {
   // Oturumdaki müşteri (varsa) — userId istemciden DEĞİL, sunucudan alınır.
   const currentUser = await getCurrentUser();
 
+  // "Bu kişiyi hesabıma kaydet" işaretlenen yolcu sıraları.
+  const kaydedilecek = new Set(
+    s(fd, "kisileriKaydet")
+      .split(",")
+      .map((v) => Number(v.trim()))
+      .filter((n) => Number.isInteger(n) && n >= 0 && n < passengers.length)
+  );
+
   const result = await createPendingBooking({
     tourId,
     departureId,
@@ -82,6 +90,32 @@ export async function submitCheckout(fd: FormData) {
     const tour = await prisma.tour.findUnique({ where: { id: tourId } });
     const back = tour ? `/turlar/${tour.slug}` : "/turlar";
     redirect(`${back}?hata=${encodeURIComponent(result.error)}`);
+  }
+
+  // Kayıtlı kişiler — rezervasyon oluştuktan SONRA, ödemeden önce yazılır.
+  // Best-effort: kaydetme başarısız olsa bile satın alma akışı sürer
+  // (lib/saved-passengers.ts içinde her kişi tek tek korunur).
+  if (currentUser && kaydedilecek.size > 0) {
+    try {
+      const { saveFromBooking } = await import("@/lib/saved-passengers");
+      await saveFromBooking(
+        currentUser.id,
+        [...kaydedilecek].map((i) => ({
+          firstName: passengers[i].firstName,
+          lastName: passengers[i].lastName,
+          idNumber: passengers[i].idNumber,
+          birthDate: passengers[i].birthDate,
+          gender: passengers[i].gender,
+          nationality: passengers[i].nationality,
+          country: passengers[i].country,
+        }))
+      );
+    } catch (error) {
+      console.error("[checkout: kayıtlı kişiler yazılamadı]", {
+        userId: currentUser.id,
+        error,
+      });
+    }
   }
 
   const tour = await prisma.tour.findUnique({ where: { id: tourId } });

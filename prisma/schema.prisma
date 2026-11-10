@@ -270,10 +270,38 @@ model User {
   tier           String    @default("BRONZE") // BRONZE | SILVER | GOLD | PLATINUM
   createdAt      DateTime  @default(now())
 
-  accounts  Account[]
-  sessions  Session[]
-  bookings  Booking[]
-  pointsLog PointsLedger[]
+  accounts        Account[]
+  sessions        Session[]
+  bookings        Booking[]
+  pointsLog       PointsLedger[]
+  savedPassengers SavedPassenger[]
+}
+
+// Müşterinin hesabına kaydettiği yolcu bilgisi (kendisi ve yakınları).
+// Amaç: her rezervasyonda TC kimlik no / doğum tarihi gibi alanları yeniden
+// girmek zorunda kalmamak — satın alma formunda listeden seçilip doldurulur.
+//
+// KVKK: kayıt OPT-IN'dir (müşteri satın alma formunda ya da Kişilerim
+// sayfasında açıkça kaydeder) ve Kişilerim sayfasından silinebilir. Rezervasyonun
+// kendi Passenger kaydı bundan BAĞIMSIZDIR: buradaki kayıt silinince geçmiş
+// rezervasyon etkilenmez (yolcu listesi, bilet ve fatura olduğu gibi kalır).
+model SavedPassenger {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName   String
+  lastName    String
+  idNumber    String? // TC kimlik no veya pasaport no
+  birthDate   DateTime? // yaş indirimi bundan hesaplanır
+  gender      String? // E | K
+  nationality String    @default("TC") // TC | FOREIGN
+  country     String? // yabancı uyruklu ise ülke adı
+  label       String    @default("") // müşterinin kendi notu: "Eşim", "Oğlum"…
+  isSelf      Boolean   @default(false) // "Ben" kaydı — listede en üstte gösterilir
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
 }
 
 model Account {

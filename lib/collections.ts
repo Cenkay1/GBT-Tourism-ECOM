@@ -148,6 +148,16 @@ export async function recordCollection(
         console.error("[tahsilat: tamamlandı bildirimi hatası]", e);
       }
     }
+  } else if (balance > 0 && input.notify !== false) {
+    // Bakiye açık kaldı: müşteriye ne kadar ödediğini, ne kadar kaldığını ve
+    // son ödeme tarihini bildir. Görevli panelden tahsilat girdiğinde
+    // müşterinin bilgilendirilmesi bu satıra bağlı.
+    try {
+      const { sendBalanceStatement } = await import("@/lib/notifications");
+      await sendBalanceStatement(booking.id);
+    } catch (e) {
+      console.error("[tahsilat: bakiye bildirimi hatası]", e);
+    }
   }
 
   return { ok: true, paidAmount, balance, duplicate: false };

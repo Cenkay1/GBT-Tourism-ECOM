@@ -177,7 +177,13 @@ export default async function TourDetail({
 
           <div className="mt-6">
             <h2 className="text-lg font-bold text-brand">Tur Hakkında</h2>
-            <p className="mt-2 leading-relaxed text-slate-600">{tour.description}</p>
+            {/* whitespace-pre-line: açıklama düz metin olarak saklanıyor (HTML
+                değil). Bu sınıf olmadan tarayıcı satır sonlarını boşluğa
+                çevirir ve admin panelde ayrı satır/paragraf olarak girilen
+                metin tek blok hâlinde birleşik görünür. */}
+            <p className="mt-2 whitespace-pre-line leading-relaxed text-slate-600">
+              {tour.description}
+            </p>
           </div>
 
           {tour.highlights.length > 0 && (

@@ -815,6 +815,14 @@ export function priceBooking(input: {
 // Tour.balanceDueDays); aşağıdaki sabitler yalnız yeni tur açılışındaki
 // varsayılanlardır.
 
+// Ödemeye geçen müşteri için koltuğun kaç dakika ayrı tutulduğu.
+//
+// lib/shared.ts'te duruyor (lib/booking.ts'te değil) çünkü istemci bileşenleri
+// de bu süreyi kullanıcıya yazıyor; booking.ts Prisma'ya bağlı olduğu için
+// istemciden import edilemez. Tek kaynak olması, ekranda yazan süre ile
+// gerçek kilit süresinin birbirinden kaymasını engeller.
+export const HOLD_MINUTES = 5;
+
 export const DEFAULT_DEPOSIT_PERCENT = 25; // yeni turda önerilen ön ödeme oranı
 export const DEFAULT_BALANCE_DUE_DAYS = 5; // kalan ödeme: kalkıştan kaç gün önce
 export const BALANCE_REMINDER_DAYS = 6; // son tarihten 1 gün önce hatırlat

@@ -19,12 +19,21 @@ import {
   depositFor,
   balanceOf,
   balanceDueDateFor,
+  HOLD_MINUTES,
   type AgeBand,
   type RoomPlan,
   type PaymentPlan,
 } from "@/lib/shared";
 
-export const HOLD_MINUTES = 15;
+// Koltuk kilidi süresi lib/shared.ts'te tanımlı (istemci de yazıyor).
+// Burada yeniden dışa aktarılıyor: mevcut çağıranlar bu modülden import ediyor.
+//
+// Süre kısa tutuluyor — kilit süresince koltuk başka müşteriye satılamaz, yani
+// her dakika satış kaybı riski. Müşteri iyzico sayfasından vazgeçip dönerse
+// koltuk süreyi beklemeden ANINDA bırakılır (bkz.
+// app/api/odeme/iyzico/callback/route.ts); bu süre yalnız hiç geri dönmeyen
+// (sekmeyi kapatan) müşteriler için geçerli üst sınırdır.
+export { HOLD_MINUTES } from "@/lib/shared";
 
 // Kalan ödeme bağlantısı anahtarı (bkz. Booking.balanceToken).
 function newBalanceToken(): string {
@@ -723,8 +732,25 @@ export async function createManualPaidBooking(
 
   const fresh = await prisma.booking.findUnique({
     where: { id: created.bookingId },
-    select: { balanceDueAt: true },
+    select: { balanceDueAt: true, paidAmount: true, totalAmount: true },
   });
+
+  // Elden satışta onay bildirimi kapalı (markBookingPaid notify:false) —
+  // görevli satışı ofiste zaten anlatıyor. Ama TAHSİLAT EKSİKSE müşterinin
+  // ne kadar borcu kaldığını ve son ödeme tarihini yazılı olarak alması
+  // gerekir; aksi halde kuralı yalnız sözlü duyar. Best-effort: bildirim
+  // gönderilemezse satış yine kaydedilmiş kalır.
+  if (fresh && balanceOf(fresh.totalAmount, fresh.paidAmount) > 0) {
+    try {
+      const { sendBalanceStatement } = await import("@/lib/notifications");
+      await sendBalanceStatement(created.bookingId);
+    } catch (e) {
+      console.error("[Elden satış: bakiye bildirimi hatası]", {
+        bookingId: created.bookingId,
+        error: e,
+      });
+    }
+  }
 
   return {
     ok: true,

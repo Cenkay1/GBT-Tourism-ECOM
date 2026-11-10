@@ -10,7 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { verifyIyzicoCallback } from "@/lib/payment";
-import { markBookingPaid } from "@/lib/booking";
+import { markBookingPaid, cancelBooking } from "@/lib/booking";
 import { prisma } from "@/lib/db";
 
 // POST → GET dönüşümü için 303 gerekir. 307 kullanılsa tarayıcı hedef sayfaya
@@ -42,6 +42,38 @@ async function isAdminCardBooking(bookingId: string): Promise<boolean> {
   return b?.paymentMethod === "KREDI_KARTI";
 }
 
+// Ödeme tamamlanmadı (müşteri vazgeçti, kart reddedildi, 3D doğrulama geçmedi):
+// koltukları BEKLEMEDEN serbest bırak.
+//
+// iyzico bu uca yalnız işlemin SONUCUYLA gelir; ara durumda çağırmaz. Dolayısıyla
+// buraya düşen bir rezervasyonun ödemesi bitmiştir ve koltuğu tutmanın anlamı
+// yoktur — kilit süresinin (HOLD_MINUTES) dolmasını beklemek koltuğu boş yere
+// satıştan çeker. cancelBooking yalnız KILITLI koltukları açar ve ödenmiş
+// rezervasyona dokunmaz, yani başarılı bir ödemeyi geri almaz.
+//
+// Müşterinin yeniden deneyebilmesi için koltuk seçimine dönmesi gerekir; bu
+// yüzden çağıran taraf onu ödeme sayfasında bırakmaz, tur sayfasına yönlendirir.
+async function releaseSeatsAfterFailure(bookingId: string): Promise<string | null> {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { status: true, tour: { select: { slug: true } } },
+  });
+  if (!booking) return null;
+  if (booking.status === "BEKLIYOR") {
+    try {
+      await cancelBooking(bookingId);
+    } catch (e) {
+      // Koltuk bırakılamazsa kilit süresi dolunca releaseExpiredHolds toplar;
+      // müşteriye hata göstermeyi engellemez.
+      console.error("[iyzico: başarısız ödeme sonrası koltuk bırakılamadı]", {
+        bookingId,
+        error: e,
+      });
+    }
+  }
+  return booking.tour.slug;
+}
+
 // POST ve GET aynı doğrulama/yönlendirme akışını paylaşır.
 async function handleToken(req: Request, token: string): Promise<Response> {
   if (!token) {
@@ -63,15 +95,27 @@ async function handleToken(req: Request, token: string): Promise<Response> {
     adminCard = bookingId ? await isAdminCardBooking(bookingId) : false;
 
     if (!result.ok) {
+      // Ödeme tamamlanmadı: koltukları hemen serbest bırak (kilit süresini bekletme).
+      const slug = bookingId ? await releaseSeatsAfterFailure(bookingId) : null;
+
       if (adminCard) {
         return seeOther(
           req,
           `/admin/rezervasyonlar/yeni?hata=${encodeURIComponent(
-            `Kart ödemesi tamamlanamadı: ${result.error} Rezervasyon süre dolunca koltuklar otomatik serbest kalır; yeniden deneyebilirsiniz.`
+            `Kart ödemesi tamamlanamadı: ${result.error} Koltuklar serbest bırakıldı; satışı yeniden girebilirsiniz.`
           )}`
         );
       }
-      // Rezervasyon biliniyorsa ödeme sayfasına, değilse belirsiz sonucu göster.
+      // Koltuk seçimine dön: koltuklar bırakıldığı için ödeme sayfasında
+      // kalmanın anlamı yok, müşteri yeniden seçip deneyebilsin.
+      if (slug) {
+        return seeOther(
+          req,
+          `/turlar/${slug}?hata=${encodeURIComponent(
+            `${result.error} Koltuklarınız serbest bırakıldı; dilerseniz tekrar seçip deneyebilirsiniz.`
+          )}`
+        );
+      }
       if (bookingId) {
         return seeOther(req, `/odeme/${bookingId}?hata=${encodeURIComponent(result.error)}`);
       }
