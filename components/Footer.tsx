@@ -28,6 +28,7 @@ export default function Footer() {
           <ul className="space-y-2 text-sm">
             <li><Link href="/turlar?kategori=YURT_ICI" className="hover:text-white">Yurt İçi Turlar</Link></li>
             <li><Link href="/turlar?kategori=YURT_DISI" className="hover:text-white">Yurt Dışı Turlar</Link></li>
+            <li><Link href="/tatil-otel" className="hover:text-white">Tatil &amp; Otel</Link></li>
           </ul>
         </div>
         <div>

@@ -124,6 +124,8 @@ export default async function CheckoutPage({
           }
           initialRooms={odalar}
           currency={tour.currency}
+          depositPercent={tour.depositPercent ?? 0}
+          balanceDueDays={tour.balanceDueDays ?? 5}
           defaults={
             user
               ? {

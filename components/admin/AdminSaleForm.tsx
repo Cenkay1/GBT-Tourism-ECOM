@@ -9,6 +9,9 @@ import {
   formatPrice,
   genderLabel,
   departureSeatsLeft,
+  depositFor,
+  balanceDueDateFor,
+  formatDate,
 } from "@/lib/shared";
 
 interface PassRow {
@@ -75,10 +78,26 @@ export default function AdminSaleForm({
   const [consentOk, setConsentOk] = useState(false);
   const [totalTouched, setTotalTouched] = useState(false);
   const [total, setTotal] = useState(tour.price);
+  // Şimdi ELDEN ALINAN tutar. Dokunulmadıkça toplamı izler (peşin satış);
+  // görevli daha azını girerse rezervasyon açık bakiyeli kaydedilir.
+  const [collectedTouched, setCollectedTouched] = useState(false);
+  const [collected, setCollected] = useState(tour.price);
 
   const count = isKoltuk ? rows.length : quantity;
   const autoTotal = tour.price * count;
   const shownTotal = totalTouched ? total : autoTotal;
+  const shownCollected = collectedTouched
+    ? Math.min(collected, shownTotal)
+    : shownTotal;
+  const remaining = Math.max(0, shownTotal - shownCollected);
+  const depositSuggestion =
+    (tour.depositPercent ?? 0) > 0
+      ? depositFor(shownTotal, tour.depositPercent!)
+      : 0;
+  // Kalan ödemenin son tarihi: seçili seferin kalkışından balanceDueDays gün önce.
+  const balanceDue = departure
+    ? balanceDueDateFor(departure.departureDate, tour.balanceDueDays ?? 5)
+    : null;
 
   const capacityLeft =
     tour.bookingType === "KONTENJAN"
@@ -133,6 +152,7 @@ export default function AdminSaleForm({
       <input type="hidden" name="seatCodes" value={JSON.stringify(seatCodes)} />
       <input type="hidden" name="quantity" value={String(count)} />
       <input type="hidden" name="totalAmount" value={String(shownTotal)} />
+      <input type="hidden" name="collectedAmount" value={String(shownCollected)} />
 
       {/* Sefer seçimi — koltuk/kontenjan sefere göre değişir */}
       {departures.length > 1 && (
@@ -322,6 +342,71 @@ export default function AdminSaleForm({
             </button>
           )}
         </div>
+
+        {/* Şimdi alınan para — peşin mi, ön ödeme mi */}
+        <div className="mt-5 border-t border-slate-100 pt-5">
+          <h3 className="font-bold text-brand">Şimdi Alınan Tutar</h3>
+          <p className="mt-0.5 mb-3 text-xs text-slate-400">
+            Müşteriden şu anda aldığınız parayı girin. Toplamın tamamını aldıysanız
+            dokunmanıza gerek yok. Daha azını aldıysanız rezervasyon{" "}
+            <strong>açık bakiyeli</strong> kaydedilir; kalan tahsilatları rezervasyon
+            sayfasından eksilte eksilte girebilirsiniz.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="number"
+              min={0}
+              max={shownTotal}
+              value={shownCollected}
+              onChange={(e) => {
+                setCollectedTouched(true);
+                setCollected(Number(e.target.value) || 0);
+              }}
+              className="w-40 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              onClick={() => setCollectedTouched(false)}
+              className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200"
+            >
+              Tamamı ({formatPrice(shownTotal, tour.currency)})
+            </button>
+            {depositSuggestion > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCollectedTouched(true);
+                  setCollected(depositSuggestion);
+                }}
+                className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200"
+              >
+                %{tour.depositPercent} ön ödeme ({formatPrice(depositSuggestion, tour.currency)})
+              </button>
+            )}
+          </div>
+          <div
+            className={`mt-3 rounded-lg px-3 py-2 text-sm font-semibold ${
+              remaining > 0
+                ? "bg-red-50 text-red-700"
+                : "bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {remaining > 0 ? (
+              <>
+                Kalan (açık) bakiye: {formatPrice(remaining, tour.currency)}
+                {balanceDue && (
+                  <span className="mt-0.5 block text-xs font-normal">
+                    Son ödeme tarihi {formatDate(balanceDue.toISOString())} olarak
+                    kaydedilecek; bu tarihe kadar tamamlanmazsa rezervasyon otomatik
+                    iptal edilir.
+                  </span>
+                )}
+              </>
+            ) : (
+              <>Ödeme tamamlandı — açık bakiye yok.</>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Ödeme yöntemi */}
@@ -362,9 +447,11 @@ export default function AdminSaleForm({
         </div>
         {paymentMethod === "KREDI_KARTI" && (
           <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            Kaydedince iyzico ödeme sayfası açılır; kartı orada girin. Ödeme tamamlanınca
-            rezervasyon “Ödendi” olur ve müşteriye onay gider. İyzico için müşterinin geçerli
-            e-posta ve cep telefonu zorunludur. Koltuklar ödeme için 15 dakika kilitli kalır.
+            Kaydedince iyzico ödeme sayfası açılır; kartı orada girin. Karttan yalnız
+            yukarıda girdiğiniz <strong>{formatPrice(shownCollected, tour.currency)}</strong>{" "}
+            çekilir. Ödeme tamamlanınca rezervasyon “Ödendi” olur ve müşteriye onay gider.
+            İyzico için müşterinin geçerli e-posta ve cep telefonu zorunludur. Koltuklar
+            ödeme için 15 dakika kilitli kalır.
           </p>
         )}
       </div>
@@ -403,8 +490,8 @@ export default function AdminSaleForm({
           className="rounded-lg bg-accent px-6 py-2.5 text-sm font-bold text-white hover:bg-accent-dark disabled:opacity-50"
         >
           {paymentMethod === "KREDI_KARTI"
-            ? `iyzico Ödeme Sayfasına Geç (${formatPrice(shownTotal, tour.currency)})`
-            : `Elden Satışı Kaydet (${formatPrice(shownTotal, tour.currency)})`}
+            ? `iyzico Ödeme Sayfasına Geç (${formatPrice(shownCollected, tour.currency)})`
+            : `Elden Satışı Kaydet (${formatPrice(shownCollected, tour.currency)} tahsil)`}
         </button>
         <a
           href="/admin/rezervasyonlar"

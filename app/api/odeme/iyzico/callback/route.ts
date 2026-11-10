@@ -84,7 +84,14 @@ async function handleToken(req: Request, token: string): Promise<Response> {
     // Ödeme doğrulandı. markBookingPaid koltukları SATILDI'ya çeker, onay
     // SMS/e-postasını ve sadakat puanını tetikler; ODENDI olan bir rezervasyonda
     // sessizce başarı döner, yani iyzico callback'i tekrar gönderirse zararsız.
-    const paid = await markBookingPaid(result.bookingId, result.paymentId);
+    // Tahsil edilen tutar doğrulamadan gelir (ön ödemede kapora, kalan
+    // ödemede bakiye). collectionPaymentId iyzico ödeme kimliğidir: callback
+    // iki kez gelirse aynı para ikinci kez tahsilat olarak yazılmaz.
+    const paid = await markBookingPaid(result.bookingId, result.paymentId, {
+      collected: result.amount,
+      collectionMethod: adminCard ? "KREDI_KARTI" : "ONLINE",
+      collectionPaymentId: result.paymentId,
+    });
     if (!paid.ok) {
       console.error("[iyzico: ödeme alındı ama rezervasyon işlenemedi]", {
         bookingId: result.bookingId,

@@ -232,6 +232,52 @@ async function main() {
     console.log("  = Invoice tablosu zaten var");
   }
 
+  // Tahsilat defteri (ön satış / elden kısmi ödeme). Booking.paidAmount bu
+  // satırların toplamından türetilir.
+  if (!(await tableExists("Collection"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "Collection" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "bookingId" TEXT NOT NULL,
+        "amount" INTEGER NOT NULL,
+        "method" TEXT NOT NULL,
+        "note" TEXT NOT NULL DEFAULT '',
+        "paymentId" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Collection_bookingId_fkey" FOREIGN KEY ("bookingId")
+          REFERENCES "Booking" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+    // paymentId UNIQUE: iyzico callback'i iki kez gelirse aynı para ikinci kez
+    // tahsilat olarak yazılmaz (mükerrer tahsilat koruması).
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX "Collection_paymentId_key" ON "Collection"("paymentId")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX "Collection_bookingId_idx" ON "Collection"("bookingId")`
+    );
+    console.log("  + Collection tablosu");
+  } else {
+    console.log("  = Collection tablosu zaten var");
+  }
+
+  // "Tatil & Otel" bize ulaşın formundan gelen talepler.
+  if (!(await tableExists("HotelInquiry"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "HotelInquiry" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "firstName" TEXT NOT NULL,
+        "lastName" TEXT NOT NULL,
+        "phone" TEXT NOT NULL,
+        "note" TEXT NOT NULL DEFAULT '',
+        "status" TEXT NOT NULL DEFAULT 'YENI',
+        "emailSent" BOOLEAN NOT NULL DEFAULT false,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`);
+    console.log("  + HotelInquiry tablosu");
+  } else {
+    console.log("  = HotelInquiry tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {
@@ -244,6 +290,10 @@ async function main() {
   await add("Tour", "hasAccommodation", `"hasAccommodation" BOOLEAN NOT NULL DEFAULT false`);
   await add("Tour", "singleSupplement", `"singleSupplement" INTEGER NOT NULL DEFAULT 2000`);
   await add("Tour", "doorAfterRow", `"doorAfterRow" INTEGER`);
+  // Ön satış (kapora): 0 = bu turda ön ödeme kapalı (mevcut turların davranışı
+  // değişmesin diye varsayılan 0; acente turu düzenleyip oranı girer).
+  await add("Tour", "depositPercent", `"depositPercent" INTEGER NOT NULL DEFAULT 0`);
+  await add("Tour", "balanceDueDays", `"balanceDueDays" INTEGER NOT NULL DEFAULT 5`);
   await add("Tour", "backRowFull", `"backRowFull" BOOLEAN NOT NULL DEFAULT false`);
 
   // Bus
@@ -269,6 +319,27 @@ async function main() {
   await add("Booking", "consentVersion", `"consentVersion" TEXT`);
   await add("Booking", "consentIp", `"consentIp" TEXT`);
   await add("Booking", "invoicePassengerIndex", `"invoicePassengerIndex" INTEGER`);
+  // Tahsilat: paidAmount tahsil edilen tutar, balanceDueAt kalan ödemenin son
+  // tarihi, balanceToken müşterinin kalan ödeme bağlantısının gizli anahtarı.
+  // paidAmount DEFAULT 0 ile eklenir; aşağıdaki 4. adım geçmiş ödenmiş
+  // rezervasyonları toplam tutarına eşitler (yoksa hepsi "ödenmemiş" görünür).
+  await add("Booking", "paidAmount", `"paidAmount" INTEGER NOT NULL DEFAULT 0`);
+  await add("Booking", "balanceDueAt", `"balanceDueAt" DATETIME`);
+  await add("Booking", "balanceReminderSentAt", `"balanceReminderSentAt" DATETIME`);
+  await add("Booking", "balanceToken", `"balanceToken" TEXT`);
+  // balanceToken UNIQUE: /kalan-odeme/<token> adresi tek bir rezervasyona
+  // çözümlenmeli. Kolon sonradan eklendiği için indeks ayrıca kurulur.
+  if ((await columns("Booking")).has("balanceToken")) {
+    const idx = await prisma.$queryRawUnsafe<{ name: string }[]>(
+      `SELECT name FROM sqlite_master WHERE type='index' AND name='Booking_balanceToken_key'`
+    );
+    if (idx.length === 0) {
+      await prisma.$executeRawUnsafe(
+        `CREATE UNIQUE INDEX "Booking_balanceToken_key" ON "Booking"("balanceToken")`
+      );
+      console.log("  + Booking.balanceToken UNIQUE indeksi");
+    }
+  }
 
   // Passenger
   await add("Passenger", "birthDate", `"birthDate" DATETIME`);
@@ -440,6 +511,23 @@ async function main() {
     }
     console.log(`  ! ${seatless.failed.length} sefer onarılamadı — elle incelenmeli`);
   }
+
+  console.log("== 8. Geçmiş rezervasyonların tahsilatı ==");
+  // paidAmount kolonu 0 varsayılanıyla eklendi. Geçmişte ödenmiş (ODENDI)
+  // rezervasyonlar peşin tahsil edilmişti; eşitlenmezse panelde hepsi
+  // "ödeme alınmadı" (kırmızı) görünür ve zamanlanmış görev bunları eksik
+  // ödemeli sanıp İPTAL ETMEYE kalkar. Yalnız paidAmount'ı 0 olanlar
+  // güncellenir — bu adım tekrar çalıştırılabilir ve sonradan girilen
+  // kısmi tahsilatları bozmaz.
+  // Kolondan kolona atama Prisma updateMany ile yapılamadığı için ham SQL.
+  const backfilledCount = await prisma.$executeRawUnsafe(
+    `UPDATE "Booking" SET "paidAmount" = "totalAmount" WHERE "status" = 'ODENDI' AND "paidAmount" = 0`
+  );
+  console.log(
+    backfilledCount > 0
+      ? `  + ${backfilledCount} ödenmiş rezervasyonun tahsilatı toplam tutarına eşitlendi`
+      : "  = eşitlenecek rezervasyon yok"
+  );
 
   console.log("== Özet ==");
   const counts = await prisma.tourPlace.groupBy({ by: ["type"], _count: true });

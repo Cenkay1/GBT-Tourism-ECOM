@@ -95,9 +95,20 @@ export default function ConsentCheckboxes({
               md. 15 uyarınca cayma hakkının istisnasıdır.
             </p>
             <p>
-              <strong className="text-slate-700">İptal talebi:</strong> Kalkıştan önce
-              acenteye bildirilen iptallerde, turun niteliğine ve kalan süreye göre kesinti
-              uygulanabilir.
+              <strong className="text-slate-700">Ön ödeme:</strong> Ön ödeme ile
+              rezervasyonda koltuğunuz ayrılır; kalan tutar tur tarihinden en geç 5 gün önce
+              tamamlanmalıdır. Tamamlanmayan rezervasyonlar iptal edilir ve koltuk diğer
+              misafirlere açılır.
+            </p>
+            <p>
+              <strong className="text-slate-700">İptal talebi:</strong> Hareket tarihine 5
+              günden az kala yapılan iptallerde ödenen tutarın %50&apos;si iade edilir; 2
+              günden az kala yapılan iptallerde iade yapılmaz. İptal talepleri yazılı olarak
+              iletilmelidir.
+            </p>
+            <p>
+              <strong className="text-slate-700">Devir:</strong> Aynı koşulları kabul eden
+              başka bir katılımcı bulunursa rezervasyon, acentenin onayıyla devredilebilir.
             </p>
             <p>
               <strong className="text-slate-700">Acente kaynaklı iptal:</strong> Turun

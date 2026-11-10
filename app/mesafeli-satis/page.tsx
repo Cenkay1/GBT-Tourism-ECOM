@@ -14,7 +14,7 @@ const dash = (v: string | null) => v ?? "—";
 
 export default function DistanceSalesPage() {
   return (
-    <LegalLayout title="Mesafeli Satış Sözleşmesi" updatedAt="06.08.2026">
+    <LegalLayout title="Mesafeli Satış Sözleşmesi" updatedAt="10.11.2026">
       <p>
         İşbu Mesafeli Satış Sözleşmesi (&quot;Sözleşme&quot;), 6502 sayılı Tüketicinin
         Korunması Hakkında Kanun ve Mesafeli Sözleşmeler Yönetmeliği hükümlerine uygun
@@ -94,8 +94,24 @@ export default function DistanceSalesPage() {
         sayfasında yer almak üzere aşağıdaki gibidir:
       </p>
       <ul className="list-disc space-y-1 pl-6">
-        <li>Hareket tarihinden 7 (yedi) gün ve öncesinde yapılan iptallerde ücretin tamamı iade edilir.</li>
-        <li>Hareket tarihine 7 (yedi) günden az süre kala yapılan iptallerde iade yapılmaz; ancak koltuk/rezervasyon üçüncü bir kişiye devredilebilir.</li>
+        <li>
+          Koltuk ayrımı için kişi başı toplam tur ücretinin %25&apos;i oranında ön ödeme
+          alınır; kalan tutar tur tarihinden en geç 5 (beş) gün önce tamamlanmalıdır.
+          Tamamlanmayan rezervasyonlar iptal edilebilir ve koltuk satışa açılabilir.
+        </li>
+        <li>
+          Tur hareket tarihine 5 (beş) günden daha az süre kala yapılan iptallerde ödenmiş
+          tur ücretinin %50&apos;si iade edilir; kalan %50&apos;si kesinti olarak uygulanır.
+        </li>
+        <li>
+          Tur hareket tarihine 2 (iki) günden az süre kala yapılan iptallerde ödenmiş tur
+          ücretinin %100&apos;ü kesinti olarak uygulanır, iade yapılmaz.
+        </li>
+        <li>
+          İptal talepleri yazılı olarak iletilmelidir. Aynı tur koşullarını kabul eden
+          başka bir katılımcı bulunması hâlinde rezervasyon, acentenin onayıyla üçüncü bir
+          kişiye devredilebilir.
+        </li>
         <li>Mücbir sebep hâllerinde ilgili mevzuat hükümleri uygulanır.</li>
         <li>Onaylanan iadeler, ödemenin yapıldığı karta/iyzico üzerinden 14 gün içinde gerçekleştirilir.</li>
       </ul>

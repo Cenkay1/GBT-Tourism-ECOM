@@ -63,6 +63,12 @@ model Tour {
   backRowFull       Boolean   @default(false) // son sırada koridorda ekstra koltuk
   hasAccommodation  Boolean   @default(false) // konaklamalı tur (oda/kişi fiyatlaması açılır)
   singleSupplement  Int       @default(2000) // tek kişilik konaklanan her oda için eklenen fark
+  // --- Ön satış (kapora) ---
+  // depositPercent = 0 → ön ödeme kapalı, tur yalnız peşin satılır.
+  // >0 ise müşteri "ön ödeme ile rezerve et" seçebilir; kalan tutarın son
+  // ödeme tarihi kalkıştan balanceDueDays gün öncesidir.
+  depositPercent    Int       @default(0) // kişi başı toplam tur ücretinin yüzdesi (örn. 25)
+  balanceDueDays    Int       @default(5) // kalan ödeme için kalkıştan kaç gün önce son tarih
   features          String    @default("[]") // seçili özellik id'leri (JSON dizi)
   excludedFeatures  String    @default("[]") // fiyata dahil OLMAYAN özellik id'leri (JSON dizi)
   status            String    @default("YAYINDA") // TASLAK | YAYINDA
@@ -148,6 +154,22 @@ model Booking {
   paymentRef            String?
   holdExpiresAt         DateTime?
   reminderSentAt        DateTime? // 24s öncesi hatırlatma gönderildi mi
+  // --- Tahsilat (ön satış / elden kısmi ödeme) ---
+  // totalAmount satışın TOPLAM tutarı; paidAmount bugüne kadar TAHSİL EDİLEN
+  // tutar (Collection satırlarının toplamı — tek doğru kaynak oradaki ledger).
+  // paidAmount < totalAmount ise rezervasyonun açık bakiyesi var: koltuk
+  // ayrılmıştır ama ödeme tamamlanmamıştır. Durum (status) için AYRI bir değer
+  // eklenmedi — "ODENDI" rezervasyonun GEÇERLİ olduğunu anlatır; ne kadarının
+  // tahsil edildiği para alanlarından okunur. Böylece kontenjan sayımı,
+  // koltuk tahtası, hatırlatma ve fatura akışları olduğu gibi çalışır.
+  paidAmount            Int            @default(0)
+  balanceDueAt          DateTime? // kalan ödemenin son tarihi (ön ödemeli satışta)
+  balanceReminderSentAt DateTime? // kalan ödeme hatırlatması gönderildi mi
+  // Misafir müşterinin kalan ödemeyi kendi ödeyebilmesi için gizli bağlantı
+  // anahtarı (/kalan-odeme/<token>). Rezervasyon id'si yerine ayrı bir sır
+  // kullanılır: id e-postalarda ve URL'lerde görünüyor, tahmin edilebilir bir
+  // adres üzerinden başkasının rezervasyonu görüntülenmemeli.
+  balanceToken          String?        @unique
   userId                String? // giriş yapan müşteri (misafir rezervasyonlarda null)
   user                  User?          @relation(fields: [userId], references: [id])
   loyaltyAwardedAt      DateTime? // sadakat puanı yazıldı mı (idempotent kontrolü)
@@ -162,9 +184,36 @@ model Booking {
   invoicePassengerIndex Int?
   createdAt             DateTime       @default(now())
 
-  passengers Passenger[]
-  payments   Payment[]
-  invoice    Invoice?
+  passengers  Passenger[]
+  payments    Payment[]
+  collections Collection[]
+  invoice     Invoice?
+}
+
+// Tahsilat kaydı — bir rezervasyon için ALINAN para hareketi.
+//
+// Neden ayrı tablo: ön satışta para parça parça gelir (önce kapora, sonra
+// kalan; elden satışta görevli birkaç kez tahsil eder). Booking üzerinde tek
+// bir "ödenen" kolonu tutulsaydı "ne zaman, nasıl, kim aldı" bilgisi kaybolur
+// ve yanlış girilen bir tutar geri alınamazdı. paidAmount bu satırların
+// toplamından TÜRETİLİR (bkz. lib/collections.ts).
+//
+// Payment (iyzico) ile karıştırılmamalı: Payment bir ödeme DENEMESİNİN
+// sağlayıcı kaydıdır; Collection ise kasaya giren paradır. Online ödemede
+// ikisi birlikte oluşur (paymentId ile eşlenir).
+model Collection {
+  id        String   @id @default(cuid())
+  bookingId String
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  amount    Int // + tahsilat, - düzeltme/iade (yanlış giren tutarı geri almak için)
+  method    String // NAKIT | HAVALE | KREDI_KARTI | ONLINE
+  note      String   @default("")
+  // İlgili iyzico ödeme kaydı. UNIQUE: callback iki kez gelirse aynı para
+  // ikinci kez tahsilat olarak yazılmaz (mükerrer tahsilat koruması).
+  paymentId String?  @unique
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
 }
 
 model Passenger {
@@ -280,6 +329,20 @@ model Amenity {
   icon      String   @default("") // emoji, örn. "🍳" (opsiyonel)
   active    Boolean  @default(true)
   sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+// "Tatil & Otel" bize ulaşın formundan gelen talep. Sadece iletişim bilgisi
+// alınır; teklif/rezervasyon süreci telefonla yürütülür. E-posta gönderimi
+// başarısız olsa bile talebin kaybolmaması için veritabanına da yazılır.
+model HotelInquiry {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  phone     String
+  note      String   @default("") // müşterinin eklediği serbest not (opsiyonel)
+  status    String   @default("YENI") // YENI | ARANDI
+  emailSent Boolean  @default(false) // acenteye bildirim e-postası gitti mi
   createdAt DateTime @default(now())
 }
 

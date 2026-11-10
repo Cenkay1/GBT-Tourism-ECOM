@@ -41,6 +41,12 @@ export async function createTestBooking(
     paymentMethod?: string;
     currency?: string;
     departureDate?: Date;
+    // Tahsil edilmiş tutar. Verilmezse ODENDI rezervasyon PEŞİN ödenmiş sayılır
+    // (paidAmount = totalAmount); diğer durumlarda 0. Ön ödemeli (açık
+    // bakiyeli) senaryo kurmak için açıkça küçük bir değer verin — kodun
+    // birçok yeri "ödendi" ile "parası tam geldi"yi ayırıyor (puan yazımı,
+    // bakiye hatırlatması, otomatik iptal).
+    paidAmount?: number;
   }
 ): Promise<{ tourId: string; departureId: string; bookingId: string }> {
   const n = ++counter;
@@ -81,12 +87,17 @@ export async function createTestBooking(
     })),
   });
 
+  const totalAmount = opts?.totalAmount ?? 2000;
+  const paidAmount =
+    opts?.paidAmount ?? (status === "ODENDI" ? totalAmount : 0);
+
   const booking = await prisma.booking.create({
     data: {
       tourId: tour.id,
       departureId: departure.id,
       status,
-      totalAmount: opts?.totalAmount ?? 2000,
+      totalAmount,
+      paidAmount,
       contactName: "Test Müşteri",
       contactPhone: "5551112233",
       contactEmail: `test${n}@example.com`,

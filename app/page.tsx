@@ -2,7 +2,10 @@ import Link from "next/link";
 import BannerCarousel from "@/components/BannerCarousel";
 import TourCard from "@/components/TourCard";
 import ReviewsSection from "@/components/ReviewsSection";
+import HomeTabs from "@/components/HomeTabs";
+import HotelInquiryForm from "@/components/HotelInquiryForm";
 import { getPublishedTours, getActiveBanners, getActiveReviews } from "@/lib/tours";
+import type { Tour } from "@/lib/shared";
 import { getGoogleBusiness } from "@/lib/google-reviews";
 import {
   SearchIcon,
@@ -89,27 +92,12 @@ export default async function Home() {
           </section>
         )}
 
-      {/* Yurt içi */}
-      <Section
-        title="Yurt İçi Turlar"
-        subtitle="Türkiye'nin en güzel rotaları"
-        href="/turlar?kategori=YURT_ICI"
-      >
-        {yurtIci.map((t) => (
-          <TourCard key={t.slug} tour={t} />
-        ))}
-      </Section>
-
-      {/* Yurt dışı */}
-      <Section
-        title="Yurt Dışı Turlar"
-        subtitle="Vizeli ve vizesiz yurt dışı rotaları"
-        href="/turlar?kategori=YURT_DISI"
-      >
-        {yurtDisi.map((t) => (
-          <TourCard key={t.slug} tour={t} />
-        ))}
-      </Section>
+      {/* Yurt İçi · Yurt Dışı · Tatil & Otel sekmeleri */}
+      <HomeTabs
+        yurtIci={<TourGrid tours={yurtIci} href="/turlar?kategori=YURT_ICI" />}
+        yurtDisi={<TourGrid tours={yurtDisi} href="/turlar?kategori=YURT_DISI" />}
+        tatilOtel={<HotelTab />}
+      />
 
       {/* Misafir yorumları */}
       <ReviewsSection
@@ -152,34 +140,73 @@ function QuickSearch({ label }: { label: string }) {
   );
 }
 
-function Section({
-  title,
-  subtitle,
-  href,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  href: string;
-  children: React.ReactNode;
-}) {
+// Sekme içindeki tur ızgarası + "tümünü gör" bağlantısı.
+function TourGrid({ tours, href }: { tours: Tour[]; href: string }) {
+  if (tours.length === 0) {
+    return (
+      <p className="rounded-2xl bg-slate-50 px-5 py-8 text-center text-sm text-slate-400">
+        Bu kategoride şu anda yayında tur yok. Yeni turlarımız için bizi takip edin.
+      </p>
+    );
+  }
   return (
-    <section className="mt-14">
-      <div className="mb-5 flex items-end justify-between">
-        <div>
-          <h2 className="text-2xl font-extrabold text-brand">{title}</h2>
-          <p className="text-sm text-slate-500">{subtitle}</p>
-        </div>
+    <div>
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {tours.map((t) => (
+          <TourCard key={t.slug} tour={t} />
+        ))}
+      </div>
+      <div className="mt-5 text-right">
         <Link
           href={href}
-          className="flex items-center gap-1 text-sm font-semibold text-accent hover:underline"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-accent hover:underline"
         >
           Tümünü gör
           <ChevronRightIcon width={16} height={16} />
         </Link>
       </div>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{children}</div>
-    </section>
+    </div>
+  );
+}
+
+// "Tatil & Otel" sekmesi: tur satışı değil, iletişim talebi toplar.
+// Acente otel/tatil planlamasını telefonla yürütüyor; burada yalnız müşterinin
+// adını ve telefonunu alıp info@gozdemburakturizm.com adresine bildiriyoruz.
+function HotelTab() {
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1fr_minmax(320px,420px)]">
+      <div className="rounded-2xl bg-brand p-7 text-white">
+        <h3 className="text-xl font-extrabold">Tatilinizi birlikte planlayalım</h3>
+        <p className="mt-2 text-sm leading-relaxed text-white/85">
+          Yurt içi ve yurt dışı otel, her şey dahil tatil köyü ve erken rezervasyon
+          fırsatlarında size uygun seçeneği birlikte bulalım. Bilgilerinizi bırakın,
+          ekibimiz sizi arayarak bütçenize ve tarihlerinize uygun alternatifleri
+          anlatsın.
+        </p>
+        <ul className="mt-5 space-y-2.5 text-sm text-white/90">
+          <HotelPerk text="Otel ve tatil köyü seçenekleri" />
+          <HotelPerk text="Uçak + otel paket planlaması" />
+          <HotelPerk text="Erken rezervasyon ve kampanya takibi" />
+          <HotelPerk text="Aile ve grup konaklamalarında özel fiyat" />
+        </ul>
+        <p className="mt-6 text-xs text-white/70">
+          Tur programlarımızı görmek için &quot;Yurt İçi&quot; ve &quot;Yurt
+          Dışı&quot; sekmelerine göz atabilirsiniz.
+        </p>
+      </div>
+      <HotelInquiryForm />
+    </div>
+  );
+}
+
+function HotelPerk({ text }: { text: string }) {
+  return (
+    <li className="flex items-start gap-2">
+      <span aria-hidden className="mt-0.5 font-bold text-white">
+        ✓
+      </span>
+      <span>{text}</span>
+    </li>
   );
 }
 

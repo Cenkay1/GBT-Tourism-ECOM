@@ -35,6 +35,8 @@ export interface Tour {
   documents?: TourDocument[]; // tur programı dosyaları (PDF/Word)
   hasAccommodation?: boolean;
   singleSupplement?: number;
+  depositPercent?: number; // ön ödeme oranı (%); 0 = ön ödeme kapalı
+  balanceDueDays?: number; // kalan ödeme: kalkıştan kaç gün önce son tarih
   departures?: TourDeparture[]; // turun seferleri (kalkış/dönüş çiftleri)
   soldSeats?: string[]; // müsait olmayan (satılı veya kilitli) koltuklar
   blockedSeats?: string[]; // admin tarafından online satışa kapatılmış koltuklar (BLOKE)
@@ -266,6 +268,16 @@ export function formatPhone(value: string): string {
   const n = d.length === 10 ? "0" + d : d;
   if (n.length !== 11) return value;
   return `0(${n.slice(1, 4)}) ${n.slice(4, 7)} ${n.slice(7, 9)} ${n.slice(9, 11)}`;
+}
+
+// wa.me bağlantısı için uluslararası biçim (yalnız rakam, 90 ön ekli).
+// Kayıtlı numara 10 ya da 11 haneli olabildiği için baştaki 0 burada atılır:
+// elle "9" + numara birleştirmek 10 haneli kayıtlarda yanlış numara üretiyordu.
+export function whatsappNumber(value: string): string {
+  const d = normalizePhone(value);
+  if (d.startsWith("90")) return d;
+  if (d.startsWith("0")) return `90${d.slice(1)}`;
+  return `90${d}`;
 }
 
 // --- Serbest koltuk planı ---
@@ -791,4 +803,66 @@ export function priceBooking(input: {
     singleRooms,
     unverifiedCount: perPassenger.filter((p) => p.fullFare).length,
   };
+}
+
+// --- Ön satış (kapora) ve tahsilat ---------------------------------------
+//
+// İş kuralı (acentenin rezervasyon koşulları):
+//   • Koltuk ayrılması için kişi başı toplam tur ücretinin %X'i ön ödeme alınır.
+//   • Kalan tutar, kalkıştan en geç N gün önce tamamlanmalıdır.
+//   • Tamamlanmayan rezervasyon iptal edilir ve koltuk satışa açılır.
+// Yüzde ve gün sayısı TUR BAZINDA yönetilir (Tour.depositPercent /
+// Tour.balanceDueDays); aşağıdaki sabitler yalnız yeni tur açılışındaki
+// varsayılanlardır.
+
+export const DEFAULT_DEPOSIT_PERCENT = 25; // yeni turda önerilen ön ödeme oranı
+export const DEFAULT_BALANCE_DUE_DAYS = 5; // kalan ödeme: kalkıştan kaç gün önce
+export const BALANCE_REMINDER_DAYS = 6; // son tarihten 1 gün önce hatırlat
+
+// Müşterinin satın alırken seçtiği ödeme planı.
+export type PaymentPlan = "FULL" | "DEPOSIT";
+
+// Ön ödeme tutarı. Yukarı yuvarlanır (küsurat acentenin lehine kalsın) ve
+// hiçbir koşulda toplamı aşmaz.
+export function depositFor(total: number, percent: number): number {
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  if (!Number.isFinite(percent) || percent <= 0) return 0;
+  if (percent >= 100) return total;
+  return Math.min(total, Math.ceil((total * percent) / 100));
+}
+
+// Açık bakiye — asla negatif dönmez (fazla tahsilat "0 kalan" sayılır).
+export function balanceOf(total: number, paid: number): number {
+  return Math.max(0, (total || 0) - (paid || 0));
+}
+
+// Rezervasyonun para durumu. Renk kodu da buna bağlı: TAMAM yeşil, diğerleri
+// kırmızı/kehribar — görevli listeye bakınca eksiği görsün.
+export type PaymentState = "ODENMEDI" | "ON_ODEME" | "TAMAM";
+
+export function paymentStateOf(total: number, paid: number): PaymentState {
+  if (paid >= (total || 0)) return "TAMAM";
+  if (paid > 0) return "ON_ODEME";
+  return "ODENMEDI";
+}
+
+export function paymentStateLabel(s: PaymentState): string {
+  if (s === "TAMAM") return "Ödeme tamamlandı";
+  if (s === "ON_ODEME") return "Ön ödeme alındı";
+  return "Ödeme alınmadı";
+}
+
+// Liste/rozet renkleri (Tailwind sınıfları).
+export const PAYMENT_STATE_BADGE: Record<PaymentState, string> = {
+  TAMAM: "bg-emerald-50 text-emerald-700",
+  ON_ODEME: "bg-red-50 text-red-700",
+  ODENMEDI: "bg-red-100 text-red-800",
+};
+
+// Kalan ödemenin son tarihi: kalkıştan `days` gün öncesi.
+export function balanceDueDateFor(departureDate: string | Date, days: number): Date {
+  const dep =
+    departureDate instanceof Date ? departureDate : parseDepartureDate(departureDate);
+  const safeDays = Number.isFinite(days) && days > 0 ? days : DEFAULT_BALANCE_DUE_DAYS;
+  return new Date(dep.getTime() - safeDays * 24 * 60 * 60 * 1000);
 }

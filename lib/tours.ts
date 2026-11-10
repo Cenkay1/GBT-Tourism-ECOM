@@ -77,6 +77,8 @@ type TourRow = {
   backRowFull: boolean;
   hasAccommodation: boolean;
   singleSupplement: number;
+  depositPercent: number;
+  balanceDueDays: number;
   features: string;
   excludedFeatures: string;
   status: string;
@@ -197,6 +199,8 @@ function toTour(
     seatMap: extra?.bus?.seatMap,
     hasAccommodation: row.hasAccommodation ?? false,
     singleSupplement: row.singleSupplement ?? 2000,
+    depositPercent: row.depositPercent ?? 0,
+    balanceDueDays: row.balanceDueDays ?? 5,
     sold: extra?.sold,
     soldSeats: extra?.soldSeats,
     blockedSeats: extra?.blockedSeats,

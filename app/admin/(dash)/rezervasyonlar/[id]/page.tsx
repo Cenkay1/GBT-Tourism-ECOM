@@ -2,7 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
-import { bandLabel as bandLabelOf, decodeRooms, paymentMethodLabel, type AgeBand } from "@/lib/shared";
+import {
+  bandLabel as bandLabelOf,
+  decodeRooms,
+  paymentMethodLabel,
+  balanceOf,
+  type AgeBand,
+} from "@/lib/shared";
+import { siteBaseUrl, balancePaymentPath } from "@/lib/company";
 import {
   setBookingStatus,
   deleteBooking,
@@ -15,6 +22,7 @@ import RefundButton from "@/components/admin/RefundButton";
 import CancelBookingButton from "@/components/admin/CancelBookingButton";
 import ChangeSeatForm from "@/components/admin/ChangeSeatForm";
 import InvoiceRetryButton from "@/components/admin/InvoiceRetryButton";
+import CollectionPanel from "@/components/admin/CollectionPanel";
 import {
   UsersIcon,
   PhoneIcon,
@@ -78,10 +86,17 @@ export default async function BookingDetail({
       boardingPlace: true,
       passengers: true,
       payments: { orderBy: { createdAt: "desc" } },
+      collections: { orderBy: { createdAt: "asc" } },
       invoice: true,
     },
   });
   if (!b) notFound();
+
+  // Tahsilat durumu: açık bakiye ve kalan ödeme bağlantısı.
+  const balance = balanceOf(b.totalAmount, b.paidAmount);
+  const balanceUrl = b.balanceToken
+    ? `${siteBaseUrl()}${balancePaymentPath(b.balanceToken)}`
+    : null;
 
   const canChangeSeat = b.tour.bookingType === "KOLTUK" &&
     (b.status === "ODENDI" || (b.status === "BEKLIYOR" && (!b.holdExpiresAt || b.holdExpiresAt > new Date())));
@@ -235,6 +250,25 @@ export default async function BookingDetail({
               </div>
             )}
           </section>
+
+          {/* Tahsilat — ön satış bakiyesi ve elden kısmi ödemeler */}
+          <CollectionPanel
+            bookingId={b.id}
+            totalAmount={b.totalAmount}
+            paidAmount={b.paidAmount}
+            currency={b.tour.currency}
+            balanceDueAt={b.balanceDueAt?.toISOString() ?? null}
+            balanceUrl={balanceUrl}
+            canCollect={b.status === "ODENDI" || b.status === "BEKLIYOR"}
+            collections={b.collections.map((c) => ({
+              id: c.id,
+              amount: c.amount,
+              method: c.method,
+              note: c.note,
+              createdAt: c.createdAt.toISOString(),
+              linkedToPayment: Boolean(c.paymentId),
+            }))}
+          />
 
           {canChangeSeat && (
             <ChangeSeatForm
@@ -482,6 +516,33 @@ export default async function BookingDetail({
                 {formatPrice(b.totalAmount, b.tour.currency)}
               </span>
             </div>
+            {/* Tahsilat özeti: para tam geldiyse yeşil, eksikse kırmızı. */}
+            {b.status !== "IPTAL" && (
+              <div className="mt-2 space-y-1 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Tahsil edilen</span>
+                  <span className="font-semibold text-emerald-700">
+                    {formatPrice(b.paidAmount, b.tour.currency)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Kalan</span>
+                  <span
+                    className={`font-extrabold ${
+                      balance > 0 ? "text-red-600" : "text-emerald-700"
+                    }`}
+                  >
+                    {formatPrice(balance, b.tour.currency)}
+                  </span>
+                </div>
+                {balance > 0 && b.balanceDueAt && (
+                  <p className="text-xs text-slate-400">
+                    Son ödeme: {formatDate(b.balanceDueAt.toISOString())}
+                    {b.balanceDueAt < new Date() && " · süresi geçti"}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {iadeliAmaIptalsiz && (
@@ -500,7 +561,16 @@ export default async function BookingDetail({
                   yalnız durum kolonunu yazar, koltuğa dokunmaz — koltuk IPTAL'de
                   zaten BOS'tur ve ikinci bir müşteriye satılmış olabilir. */}
               {b.status !== "ODENDI" && b.status !== "IPTAL" && (
-                <StatusForm id={b.id} status="ODENDI" label="Ödendi olarak işaretle" primary />
+                <>
+                  <StatusForm id={b.id} status="ODENDI" label="Ödendi olarak işaretle" primary />
+                  {/* Durum değişikliği PARA KAYDI DEĞİLDİR: tahsilat defteri
+                      ayrı tutulur, yoksa "ödendi" görünen bir rezervasyonun
+                      kasaya hiç para girmemiş olabileceği gizlenir. */}
+                  <p className="text-xs text-slate-400">
+                    Bu düğme yalnız durumu değiştirir. Alınan parayı ayrıca
+                    &quot;Tahsilat ekle&quot; bölümünden girin.
+                  </p>
+                </>
               )}
               {b.status !== "IPTAL" && <CancelBookingButton bookingId={b.id} />}
               {/* Online tahsil edilmiş ve henüz iade edilmemiş ödeme varsa

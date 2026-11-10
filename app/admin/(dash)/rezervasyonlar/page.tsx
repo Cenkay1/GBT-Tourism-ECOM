@@ -1,7 +1,13 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
-import { PAYMENT_METHODS, paymentMethodLabel } from "@/lib/shared";
+import {
+  PAYMENT_METHODS,
+  paymentMethodLabel,
+  balanceOf,
+  paymentStateOf,
+  PAYMENT_STATE_BADGE,
+} from "@/lib/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +65,7 @@ export default async function AdminBookings() {
                 <th className="px-4 py-3">Tur</th>
                 <th className="px-4 py-3">Koltuk/Kişi</th>
                 <th className="px-4 py-3">Tutar</th>
+                <th className="px-4 py-3">Tahsilat</th>
                 <th className="px-4 py-3">Durum</th>
                 <th className="px-4 py-3">Ödeme</th>
                 <th className="px-4 py-3">Tarih</th>
@@ -68,7 +75,7 @@ export default async function AdminBookings() {
             <tbody className="divide-y divide-slate-100">
               {bookings.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
                     Henüz rezervasyon yok. Ödeme entegrasyonu bağlandığında satışlar burada
                     listelenecek.
                   </td>
@@ -88,6 +95,40 @@ export default async function AdminBookings() {
                     </td>
                     <td className="px-4 py-3 font-semibold text-accent">
                       {formatPrice(b.totalAmount, b.tour.currency)}
+                    </td>
+                    {/* Tahsilat: ödeme tamamlandıysa yeşil, açık bakiye varsa
+                        kırmızı — görevli listeye bakınca eksik parayı görsün. */}
+                    <td className="px-4 py-3">
+                      {b.status === "IPTAL" || b.status === "SURE_DOLDU" ? (
+                        <span className="text-xs text-slate-400">—</span>
+                      ) : (
+                        <>
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                              PAYMENT_STATE_BADGE[
+                                paymentStateOf(b.totalAmount, b.paidAmount)
+                              ]
+                            }`}
+                          >
+                            {formatPrice(b.paidAmount, b.tour.currency)} ödendi
+                          </span>
+                          {balanceOf(b.totalAmount, b.paidAmount) > 0 && (
+                            <span className="mt-1 block text-xs font-semibold text-red-700">
+                              Kalan:{" "}
+                              {formatPrice(
+                                balanceOf(b.totalAmount, b.paidAmount),
+                                b.tour.currency
+                              )}
+                              {b.balanceDueAt && (
+                                <span className="block font-normal text-slate-400">
+                                  son ödeme {formatDate(b.balanceDueAt.toISOString())}
+                                  {b.balanceDueAt < new Date() ? " · SÜRESİ GEÇTİ" : ""}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span

@@ -35,6 +35,22 @@ export const COMPANY = {
   },
 };
 
+// Sitenin kendi kök adresi — e-postalara ve müşteriye verilen bağlantılara
+// gömülür. Sunucu tarafında çağrılır (NEXT_PUBLIC_SITE_URL tanımlıysa istemcide
+// de doğru çalışır).
+export function siteBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    process.env.AUTH_URL?.trim() ||
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
+
+// Rezervasyonun kalan ödeme sayfası (gizli bağlantı).
+export function balancePaymentPath(token: string): string {
+  return `/kalan-odeme/${encodeURIComponent(token)}`;
+}
+
 // tel: bağlantısı için sadeleştirilmiş numara
 export function telHref(phone: string): string {
   return "tel:" + phone.replace(/\s/g, "");

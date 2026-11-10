@@ -36,6 +36,8 @@ export interface TourFormValues {
   documents?: TourDocument[];
   hasAccommodation?: boolean;
   singleSupplement?: number;
+  depositPercent?: number;
+  balanceDueDays?: number;
   status?: string;
   places?: PlaceRow[];
   features?: string[];
@@ -63,6 +65,8 @@ export default function TourForm({
       : [{ departureDate: "", returnDate: "", status: "AKTIF" }]
   );
   // Konaklamalı tur: tek kişilik oda farkı ve satın alımda oda/yaş seçimi açılır.
+  // Ön ödeme (kapora) oranı: 0 ise bu turda yalnız peşin satış yapılır.
+  const [depositPercent, setDepositPercent] = useState(initial?.depositPercent ?? 0);
   const [hasAccommodation, setHasAccommodation] = useState(
     initial?.hasAccommodation ?? false
   );
@@ -198,6 +202,59 @@ export default function TourForm({
                 kişilik odalarda eklenmez.
               </span>
             </label>
+          )}
+        </div>
+
+        {/* Ön satış (kapora) — bu turda müşteri "ön ödeme ile rezerve et"
+            seçebilsin mi, seçerse yüzde kaçını şimdi ödeyecek. */}
+        <div className="mt-4 rounded-xl border border-slate-100 p-4">
+          <p className="text-sm font-medium text-slate-700">Ön Satış (Kapora)</p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Oranı <strong>0</strong> bırakırsanız bu tur yalnızca peşin satılır. 0&apos;dan
+            büyük girerseniz müşteri satın alırken &quot;peşin&quot; ya da &quot;ön ödeme ile
+            rezerve et&quot; seçeneğini görür; ön ödemede koltuk ayrılır, kalan tutarın son
+            ödeme tarihi kalkıştan aşağıda belirlediğiniz gün kadar öncesidir. Son ödeme
+            tarihine kadar tamamlanmayan rezervasyonlar otomatik iptal edilir ve koltuk
+            satışa açılır.
+          </p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <label className={label}>
+              Ön Ödeme Oranı (%)
+              <input
+                name="depositPercent"
+                type="number"
+                min={0}
+                max={100}
+                value={depositPercent}
+                onChange={(e) => setDepositPercent(Number(e.target.value) || 0)}
+                className={input}
+              />
+              <span className="mt-1 block text-xs text-slate-400">
+                Örn. 25 → kişi başı toplam tur ücretinin %25&apos;i ön ödeme olarak alınır.
+              </span>
+            </label>
+            <label className={label}>
+              Son Ödeme (kalkıştan kaç gün önce)
+              <input
+                name="balanceDueDays"
+                type="number"
+                min={1}
+                max={90}
+                defaultValue={initial?.balanceDueDays ?? 5}
+                disabled={depositPercent <= 0}
+                className={`${input} disabled:bg-slate-50 disabled:text-slate-400`}
+              />
+              <span className="mt-1 block text-xs text-slate-400">
+                Kalan ödeme bu tarihe kadar tamamlanmalı. Bir gün öncesinde müşteriye
+                otomatik hatırlatma gider.
+              </span>
+            </label>
+          </div>
+          {depositPercent > 0 && (
+            <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-800">
+              Bu turda ön ödeme açık: müşteri kişi başı ücretin %{depositPercent}&apos;ini
+              ödeyerek koltuğunu ayırtabilir.
+            </p>
           )}
         </div>
       </Card>

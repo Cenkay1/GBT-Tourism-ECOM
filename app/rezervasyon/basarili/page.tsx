@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { formatPrice, formatDate, formatDateTime } from "@/lib/tours";
-import { genderLabel } from "@/lib/shared";
-import { COMPANY } from "@/lib/company";
+import { genderLabel, balanceOf } from "@/lib/shared";
+import { COMPANY, balancePaymentPath } from "@/lib/company";
 import { ShieldIcon } from "@/components/Icons";
 import RateUsCard from "@/components/RateUsCard";
 import PrintButton from "@/components/PrintButton";
@@ -35,6 +35,12 @@ export default async function SuccessPage({
   ).toISOString();
   // Araç sefere göre değişebilir: seferin otobüsü, yoksa turun otobüsü.
   const plate = (booking.departure?.bus ?? booking.tour.bus)?.plate ?? null;
+  // Ön ödemeli satışta kalan tutar ve son ödeme tarihi burada da gösterilir —
+  // müşteri e-postayı beklemeden ne kadar borcu kaldığını görsün.
+  const balance = balanceOf(booking.totalAmount, booking.paidAmount);
+  const balanceUrl = booking.balanceToken
+    ? balancePaymentPath(booking.balanceToken)
+    : null;
   const boarding = booking.boardingPlace
     ? `${booking.boardingPlace.name}${
         booking.boardingPlace.boardingTime ? ` · ${booking.boardingPlace.boardingTime}` : ""
@@ -58,7 +64,9 @@ export default async function SuccessPage({
           {COMPANY.name} · Rezervasyon No {ref}
         </p>
         <p className="mt-2 text-sm text-slate-500 print-hidden">
-          Ödemeniz başarıyla tamamlandı. Bilet ve tur bilgileri{" "}
+          {balance > 0
+            ? "Ön ödemeniz alındı ve koltuğunuz ayrıldı. Rezervasyon bilgileri "
+            : "Ödemeniz başarıyla tamamlandı. Bilet ve tur bilgileri "}
           <span className="font-medium text-slate-700">{booking.contactEmail}</span> adresine
           gönderilecektir.
         </p>
@@ -82,10 +90,51 @@ export default async function SuccessPage({
           <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-2 font-extrabold text-brand">
             <span>Ödenen</span>
             <span className="text-accent">
-              {formatPrice(booking.totalAmount, booking.tour.currency)}
+              {formatPrice(booking.paidAmount, booking.tour.currency)}
             </span>
           </div>
+          {balance > 0 && (
+            <>
+              <Row
+                label="Toplam tutar"
+                value={formatPrice(booking.totalAmount, booking.tour.currency)}
+              />
+              <div className="mt-1 flex items-center justify-between font-extrabold text-red-700">
+                <span>Kalan</span>
+                <span>{formatPrice(balance, booking.tour.currency)}</span>
+              </div>
+              {booking.balanceDueAt && (
+                <p className="mt-1 text-xs text-slate-500">
+                  Son ödeme tarihi:{" "}
+                  <strong>{formatDate(booking.balanceDueAt.toISOString())}</strong>
+                </p>
+              )}
+            </>
+          )}
         </div>
+
+        {/* Ön ödemeli rezervasyon: kalan ödeme ve koşullar */}
+        {balance > 0 && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-5 text-left text-sm text-amber-900">
+            <p className="font-bold">Kalan ödemeniz: {formatPrice(balance, booking.tour.currency)}</p>
+            <p className="mt-1 text-xs leading-relaxed">
+              Kalan tutar, tur tarihinden en geç 5 gün önce
+              {booking.balanceDueAt
+                ? ` (${formatDate(booking.balanceDueAt.toISOString())} tarihine kadar)`
+                : ""}{" "}
+              tamamlanmalıdır. Bu tarihe kadar tamamlanmayan rezervasyonlar iptal edilir ve
+              koltuk hakkı diğer misafirlerimizin rezervasyonuna açılır.
+            </p>
+            {balanceUrl && (
+              <a
+                href={balanceUrl}
+                className="mt-3 inline-block rounded-lg bg-accent px-4 py-2.5 text-xs font-bold text-white hover:bg-accent-dark print-hidden"
+              >
+                Kalan Ödemeyi Yap
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Yolcu listesi — e-postayı beklemeden elinde olsun. */}
         <div className="mt-4 rounded-xl border border-slate-200 p-5 text-left text-sm">

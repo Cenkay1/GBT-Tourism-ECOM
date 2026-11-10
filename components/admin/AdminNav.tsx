@@ -10,6 +10,7 @@ import {
   UsersIcon,
   UserIcon,
   CheckIcon,
+  HeadsetIcon,
 } from "@/components/Icons";
 
 const items = [
@@ -19,6 +20,7 @@ const items = [
   { href: "/admin/ozellikler", label: "Özellikler", Icon: CheckIcon },
   { href: "/admin/afisler", label: "Afişler", Icon: ImageIcon },
   { href: "/admin/rezervasyonlar", label: "Rezervasyonlar", Icon: TicketIcon },
+  { href: "/admin/talepler", label: "Talepler", Icon: HeadsetIcon },
   { href: "/admin/uyeler", label: "Üyeler", Icon: UserIcon },
   { href: "/admin/yorumlar", label: "Yorumlar", Icon: UsersIcon },
 ];

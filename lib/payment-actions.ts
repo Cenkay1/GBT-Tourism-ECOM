@@ -18,7 +18,21 @@ export async function simulateSuccess(bookingId: string) {
     );
   }
 
-  const res = await markBookingPaid(bookingId, `SIM-${Date.now()}`);
+  // Simülasyonda da tahsilat defteri doğru işlemeli: ödenecek tutar, açık
+  // bakiyedir (ilk ödemede kapora ya da toplam). collectionPaymentId sabit
+  // tutulur ki düğmeye iki kez basılması mükerrer tahsilat yazmasın.
+  const current = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { totalAmount: true, paidAmount: true, status: true },
+  });
+  if (!current) {
+    redirect(`/odeme/${bookingId}?hata=${encodeURIComponent("Rezervasyon bulunamadı.")}`);
+  }
+  const due = Math.max(0, current!.totalAmount - current!.paidAmount);
+  const res = await markBookingPaid(bookingId, `SIM-${Date.now()}`, {
+    collected: due,
+    collectionPaymentId: `SIM-${bookingId}-${current!.paidAmount}`,
+  });
   if (!res.ok) {
     redirect(`/odeme/${bookingId}?hata=${encodeURIComponent(res.error ?? "Ödeme tamamlanamadı.")}`);
   }

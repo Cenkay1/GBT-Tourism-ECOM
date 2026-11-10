@@ -9,6 +9,7 @@ const links = [
   { href: "/turlar", label: "Tüm Turlar" },
   { href: "/turlar?kategori=YURT_ICI", label: "Yurt İçi" },
   { href: "/turlar?kategori=YURT_DISI", label: "Yurt Dışı" },
+  { href: "/tatil-otel", label: "Tatil & Otel" },
   { href: "/iletisim", label: "İletişim" },
 ];
 

@@ -1,7 +1,9 @@
+import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { placePassengerInTx } from "@/lib/seat-board";
 import { isValidIdDocumentName } from "@/lib/id-documents";
 import type { ConsentRecord } from "@/lib/consent";
+import { recordCollection, type CollectionMethod } from "@/lib/collections";
 import {
   isValidId,
   isValidPhone,
@@ -14,11 +16,45 @@ import {
   roomsTotal,
   assignRooms,
   validateRooms,
+  depositFor,
+  balanceOf,
+  balanceDueDateFor,
   type AgeBand,
   type RoomPlan,
+  type PaymentPlan,
 } from "@/lib/shared";
 
 export const HOLD_MINUTES = 15;
+
+// Kalan ödeme bağlantısı anahtarı (bkz. Booking.balanceToken).
+function newBalanceToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+// Açık bakiyesi olan bir rezervasyona son ödeme tarihi ve kalan ödeme
+// bağlantısı tanımla (yoksa). Hem online ön ödemede hem elden kısmi
+// tahsilatta çağrılır — iki akışın da aynı kurala tabi olması için.
+export async function ensureBalanceSchedule(bookingId: string): Promise<void> {
+  const b = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: {
+      tour: { select: { balanceDueDays: true, departureDate: true } },
+      departure: { select: { departureDate: true } },
+    },
+  });
+  if (!b) return;
+  if (balanceOf(b.totalAmount, b.paidAmount) <= 0) return;
+
+  const departureDate = b.departure?.departureDate ?? b.tour.departureDate;
+  await prisma.booking.update({
+    where: { id: bookingId },
+    data: {
+      balanceDueAt:
+        b.balanceDueAt ?? balanceDueDateFor(departureDate, b.tour.balanceDueDays),
+      balanceToken: b.balanceToken ?? newBalanceToken(),
+    },
+  });
+}
 
 export interface PassengerInput {
   firstName: string;
@@ -54,6 +90,11 @@ export interface CreateBookingInput {
   consent?: ConsentRecord;
   // Fatura hangi yolcu adına kesilecek (0 tabanlı sıra). Yoksa ilk yolcu.
   invoicePassengerIndex?: number;
+  // Ödeme planı: FULL = peşin, DEPOSIT = ön ödeme (kapora) ile rezerve.
+  // DEPOSIT yalnız turun depositPercent'i 0'dan büyükse geçerlidir; değilse
+  // sessizce peşine düşülür (istemciden gelen değer tek başına indirim/
+  // erteleme hakkı doğurmaz).
+  paymentPlan?: PaymentPlan;
 }
 
 // Fatura hangi yolcu adına kesilecek: yalnız 0 ile yolcu sayısı arasında
@@ -82,7 +123,13 @@ function accommodationTypeOf(
 }
 
 export type CreateResult =
-  | { ok: true; bookingId: string; amount: number }
+  | {
+      ok: true;
+      bookingId: string;
+      amount: number; // satışın TOPLAM tutarı
+      dueNow: number; // şimdi tahsil edilecek tutar (ön ödemede kapora)
+      balanceDueAt?: Date | null; // kalan ödemenin son tarihi (varsa)
+    }
   | { ok: false; error: string };
 
 // Süresi dolan bekleyen rezervasyonları iptal edip koltuklarını serbest bırak.
@@ -218,6 +265,19 @@ export async function createPendingBooking(
 
   const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
 
+  // Ön ödeme (kapora) planı: yalnız turda oran tanımlıysa geçerli. Geçerliyse
+  // kalan ödemenin son tarihi ve müşterinin kalanı ödeyeceği gizli bağlantı
+  // anahtarı şimdi oluşturulur (onay e-postasına girecek).
+  const depositEnabled = tour.depositPercent > 0;
+  const useDeposit = input.paymentPlan === "DEPOSIT" && depositEnabled;
+  const balanceDueAt = useDeposit
+    ? balanceDueDateFor(departure.departureDate, tour.balanceDueDays)
+    : null;
+  const balanceToken = useDeposit ? newBalanceToken() : null;
+  // Toplam tutardan şimdi tahsil edilecek kısım.
+  const dueNowOf = (total: number): number =>
+    useDeposit ? depositFor(total, tour.depositPercent) : total;
+
   // Biniş durağı bazlı fiyat: seçilen DURAK'ın fiyatı varsa onu kullan, yoksa tur fiyatı.
   let unitPrice = tour.price;
   let boardingName: string | null = null;
@@ -325,6 +385,8 @@ export async function createPendingBooking(
             input.invoicePassengerIndex,
             input.passengers.length
           ),
+          balanceDueAt,
+          balanceToken,
           consentAcceptedAt: input.consent?.consentAcceptedAt ?? null,
           consentVersion: input.consent?.consentVersion ?? null,
           consentIp: input.consent?.consentIp ?? null,
@@ -361,7 +423,13 @@ export async function createPendingBooking(
         });
       }
 
-      return { ok: true as const, bookingId: booking.id, amount };
+      return {
+        ok: true as const,
+        bookingId: booking.id,
+        amount,
+        dueNow: dueNowOf(amount),
+        balanceDueAt,
+      };
     });
     return result;
   }
@@ -416,6 +484,8 @@ export async function createPendingBooking(
           input.invoicePassengerIndex,
           input.passengers.length
         ),
+        balanceDueAt,
+        balanceToken,
         consentAcceptedAt: input.consent?.consentAcceptedAt ?? null,
         consentVersion: input.consent?.consentVersion ?? null,
         consentIp: input.consent?.consentIp ?? null,
@@ -436,16 +506,43 @@ export async function createPendingBooking(
         },
       },
     });
-    return { ok: true as const, bookingId: booking.id, amount };
+    return {
+      ok: true as const,
+      bookingId: booking.id,
+      amount,
+      dueNow: dueNowOf(amount),
+      balanceDueAt,
+    };
   });
   return result;
 }
 
-// Ödeme başarılı: koltukları SATILDI yap, rezervasyonu ODENDI yap.
+// Ödeme alındı: koltukları SATILDI yap, rezervasyonu ODENDI yap ve TAHSİLATI
+// deftere yaz.
+//
+// "ODENDI" rezervasyonun GEÇERLİ olduğunu anlatır — tamamının tahsil edildiğini
+// değil. Ön ödemeli satışta kapora alınır, koltuk ayrılır ve rezervasyon
+// ODENDI'ya geçer; açık bakiye Booking.paidAmount < totalAmount olarak görünür.
+// Böylece kontenjan sayımı, koltuk tahtası, hatırlatma ve fatura akışları
+// ("ödenmiş rezervasyon" diye sorgulayan her yer) olduğu gibi çalışmaya devam
+// eder, ama paranın ne kadarının alındığı kaybolmaz.
+//
+// Zaten ODENDI olan bir rezervasyona gelen ödeme KALAN ÖDEME sayılır: yalnız
+// deftere yazılır. Mükerrer kayıt (iyzico callback'inin iki kez gelmesi)
+// collectionPaymentId'nin UNIQUE olmasıyla engellenir.
 export async function markBookingPaid(
   bookingId: string,
   paymentRef: string,
-  opts?: { notify?: boolean; paymentMethod?: string }
+  opts?: {
+    notify?: boolean;
+    paymentMethod?: string;
+    // Bu işlemde TAHSİL EDİLEN tutar. Verilmezse satışın tamamı tahsil
+    // edilmiş sayılır (peşin satış — eski davranış).
+    collected?: number;
+    collectionMethod?: CollectionMethod;
+    // İlgili iyzico ödeme kimliği — mükerrer tahsilat koruması için.
+    collectionPaymentId?: string;
+  }
 ): Promise<{ ok: boolean; error?: string }> {
   const notify = opts?.notify ?? true;
   const booking = await prisma.booking.findUnique({
@@ -453,7 +550,36 @@ export async function markBookingPaid(
     include: { passengers: true },
   });
   if (!booking) return { ok: false, error: "Rezervasyon bulunamadı." };
-  if (booking.status === "ODENDI") return { ok: true };
+
+  const collectionMethod: CollectionMethod =
+    opts?.collectionMethod ??
+    (opts?.paymentMethod === "NAKIT" ||
+    opts?.paymentMethod === "HAVALE" ||
+    opts?.paymentMethod === "KREDI_KARTI"
+      ? opts.paymentMethod
+      : "ONLINE");
+
+  const collected = Math.max(
+    0,
+    Math.round(opts?.collected ?? booking.totalAmount)
+  );
+
+  // Zaten geçerli bir rezervasyon: gelen para kalan ödemedir.
+  if (booking.status === "ODENDI") {
+    if (collected > 0) {
+      const res = await recordCollection({
+        bookingId,
+        amount: collected,
+        method: collectionMethod,
+        note: "Kalan ödeme",
+        paymentId: opts?.collectionPaymentId,
+        notify,
+      });
+      if (!res.ok) return { ok: false, error: res.error };
+    }
+    return { ok: true };
+  }
+
   if (booking.status !== "BEKLIYOR")
     return { ok: false, error: "Rezervasyon süresi dolmuş. Lütfen tekrar deneyin." };
   if (booking.holdExpiresAt && booking.holdExpiresAt < new Date())
@@ -486,6 +612,28 @@ export async function markBookingPaid(
       : []),
   ]);
 
+  // Tahsilatı deftere yaz. notify: false — bakiye kapandı bildirimi yerine
+  // aşağıdaki rezervasyon onayı gidiyor (ikisi birlikte gitmesin).
+  if (collected > 0) {
+    const res = await recordCollection({
+      bookingId,
+      amount: collected,
+      method: collectionMethod,
+      note: collected < booking.totalAmount ? "Ön ödeme" : "Peşin ödeme",
+      paymentId: opts?.collectionPaymentId,
+      notify: false,
+    });
+    if (!res.ok) {
+      // Para alındı ama defter yazılamadı: rezervasyonu geri almıyoruz (koltuk
+      // müşterinin), görevli panelden elle girsin diye hatayı loglayıp
+      // devam ediyoruz.
+      console.error("[Tahsilat deftere yazılamadı]", { bookingId, error: res.error });
+    }
+  }
+
+  // Eksik tahsilat varsa son ödeme tarihi ve kalan ödeme bağlantısı tanımla.
+  await ensureBalanceSchedule(bookingId);
+
   // Onay bildirimi (SMS + e-posta) — best-effort, ödemeyi bloklamaz.
   if (notify) {
     try {
@@ -505,7 +653,9 @@ export async function markBookingPaid(
     console.error("[Yaş onayı bildirimi hatası]", e);
   }
 
-  // Sadakat puanı (giriş yapmış müşteriye) — idempotent, best-effort, ödemeyi bloklamaz.
+  // Sadakat puanı (giriş yapmış müşteriye) — idempotent, best-effort, ödemeyi
+  // bloklamaz. Açık bakiye varsa puan YAZILMAZ; bakiye kapanınca
+  // recordCollection tekrar dener.
   try {
     const { awardLoyaltyForBooking } = await import("@/lib/loyalty");
     await awardLoyaltyForBooking(bookingId);
@@ -517,9 +667,14 @@ export async function markBookingPaid(
 
 // Admin elden/nakit satış: rezervasyonu oluştur, anında ODENDI + koltukları SATILDI yap.
 // Koltuk kilitleme / kontenjan / cinsiyet doğrulaması createPendingBooking'ten gelir.
+//
+// collectedAmount: görevlinin ELDEN ALDIĞI tutar. Toplamdan küçükse rezervasyon
+// açık bakiyeli kaydedilir (kırmızı görünür) ve kalan tahsilatlar panelden
+// eksilte eksilte girilir.
 export async function createManualPaidBooking(
   input: CreateBookingInput & {
     totalOverride?: number | null;
+    collectedAmount?: number | null;
     paymentMethod?: "NAKIT" | "HAVALE";
   }
 ): Promise<CreateResult> {
@@ -533,9 +688,32 @@ export async function createManualPaidBooking(
   });
   if (!created.ok) return created;
 
+  // İsteğe bağlı elle tutar (indirim/pazarlık). Tahsilat defterine doğru
+  // bakiye yazılabilmesi için ödeme İŞARETLENMEDEN ÖNCE uygulanır.
+  const override =
+    input.totalOverride != null &&
+    Number.isFinite(input.totalOverride) &&
+    input.totalOverride >= 0
+      ? Math.round(input.totalOverride)
+      : null;
+  const total = override ?? created.amount;
+  if (override != null && override !== created.amount) {
+    await prisma.booking.update({
+      where: { id: created.bookingId },
+      data: { totalAmount: override },
+    });
+  }
+
+  const collected =
+    input.collectedAmount != null && Number.isFinite(input.collectedAmount)
+      ? Math.min(Math.max(0, Math.round(input.collectedAmount)), total)
+      : total;
+
   const paid = await markBookingPaid(created.bookingId, method, {
     notify: false,
     paymentMethod: method,
+    collected,
+    collectionMethod: method,
   });
   if (!paid.ok) {
     // Ödeme işaretlenemezse kilitli koltukları serbest bırak.
@@ -543,32 +721,33 @@ export async function createManualPaidBooking(
     return { ok: false, error: paid.error ?? "Satış kaydedilemedi." };
   }
 
-  // İsteğe bağlı elle tutar (indirim/pazarlık).
-  if (
-    input.totalOverride != null &&
-    Number.isFinite(input.totalOverride) &&
-    input.totalOverride >= 0
-  ) {
-    await prisma.booking.update({
-      where: { id: created.bookingId },
-      data: { totalAmount: Math.round(input.totalOverride) },
-    });
-    return {
-      ok: true,
-      bookingId: created.bookingId,
-      amount: Math.round(input.totalOverride),
-    };
-  }
+  const fresh = await prisma.booking.findUnique({
+    where: { id: created.bookingId },
+    select: { balanceDueAt: true },
+  });
 
-  return created;
+  return {
+    ok: true,
+    bookingId: created.bookingId,
+    amount: total,
+    dueNow: collected,
+    balanceDueAt: fresh?.balanceDueAt ?? null,
+  };
 }
 
 // Admin elden satış, KREDI_KARTI: rezervasyon BEKLIYOR olarak açılır (koltuklar
 // kilitli), tutar/ödeme yöntemi yazılır; ödemeyi çağıran taraf müşteriyi (ya da
 // görevliyi) iyzico'nun güvenli sayfasına yönlendirir. ODENDI'ya geçiş,
 // iyzico callback'inde doğrulandıktan sonra olur — kart verisi sistemimize girmez.
+//
+// dueNow: karttan ÇEKİLECEK tutar. Toplamdan küçük olabilir (kapora kartla
+// alınır, kalanı sonra); bu durumda kalan bakiye ödeme doğrulandıktan sonra
+// (markBookingPaid içinde) açık bakiye olarak işlenir.
 export async function createManualCardBooking(
-  input: CreateBookingInput & { totalOverride?: number | null }
+  input: CreateBookingInput & {
+    totalOverride?: number | null;
+    collectedAmount?: number | null;
+  }
 ): Promise<CreateResult> {
   const created = await createPendingBooking({
     ...input,
@@ -587,11 +766,20 @@ export async function createManualCardBooking(
     return { ok: false, error: "Kredi kartı ödemesi için tutar 0'dan büyük olmalı." };
   }
 
+  const dueNow =
+    input.collectedAmount != null && Number.isFinite(input.collectedAmount)
+      ? Math.min(Math.max(0, Math.round(input.collectedAmount)), amount)
+      : amount;
+  if (dueNow <= 0) {
+    await cancelBooking(created.bookingId);
+    return { ok: false, error: "Kartla çekilecek tutar 0'dan büyük olmalı." };
+  }
+
   await prisma.booking.update({
     where: { id: created.bookingId },
     data: { paymentMethod: "KREDI_KARTI", totalAmount: amount },
   });
-  return { ok: true, bookingId: created.bookingId, amount };
+  return { ok: true, bookingId: created.bookingId, amount, dueNow };
 }
 
 // Ödeme iptal/başarısız: koltukları serbest bırak, rezervasyonu iptal et.
@@ -730,4 +918,65 @@ export async function cancelBookingByAdmin(
   }
 
   return { ok: true };
+}
+
+// Son ödeme tarihi geçmiş ve bakiyesi kapanmamış ön ödemeli rezervasyonları
+// iptal eder; koltukları satışa açar, müşteriye gerekçeli e-posta gider.
+//
+// İş kuralı: "Belirtilen son ödeme tarihine kadar ödemesi tamamlanmayan
+// rezervasyonlar iptal edilerek ilgili koltuk hakkı diğer misafirlerin
+// rezervasyonuna açılabilir." Para iadesi OTOMATİK YAPILMAZ — kesinti
+// kuralları görevlinin değerlendirmesine bırakılır (iade gerekirse panelden).
+//
+// Kalkış tarihi GEÇMİŞ seferlere dokunulmaz: tur yapıldıktan sonra kaydı
+// iptale çekmek koltuğu boşaltıp geçmişi yanlış gösterir.
+export async function releaseUnpaidBalances(
+  now: Date = new Date()
+): Promise<{ cancelled: number; ids: string[]; failed: string[] }> {
+  const candidates = await prisma.booking.findMany({
+    where: { status: "ODENDI", balanceDueAt: { lt: now } },
+    include: {
+      tour: { select: { departureDate: true, currency: true } },
+      departure: { select: { departureDate: true } },
+    },
+  });
+
+  const ids: string[] = [];
+  const failed: string[] = [];
+  for (const b of candidates) {
+    if (balanceOf(b.totalAmount, b.paidAmount) <= 0) continue;
+    const departureDate = b.departure?.departureDate ?? b.tour.departureDate;
+    if (departureDate <= now) continue;
+
+    const due = b.balanceDueAt!.toLocaleDateString("tr-TR", {
+      timeZone: "Europe/Istanbul",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const reason =
+      `Rezervasyonunuzun kalan ödemesi son ödeme tarihi olan ${due} tarihine kadar ` +
+      `tamamlanmadığı için rezervasyon iptal edilmiş ve koltuk hakkı diğer ` +
+      `misafirlerimizin rezervasyonuna açılmıştır. Tura katılmak isterseniz ` +
+      `müsaitlik durumunu öğrenmek için bizimle iletişime geçebilirsiniz.`;
+
+    const res = await cancelBookingByAdmin(b.id, reason);
+    if (res.ok) ids.push(b.id);
+    else {
+      failed.push(b.id);
+      console.error("[Ön ödeme iptali başarısız]", { bookingId: b.id, error: res.error });
+    }
+  }
+
+  // Acenteye özet bildirim — best-effort.
+  if (ids.length > 0) {
+    try {
+      const { sendUnpaidReleaseSummary } = await import("@/lib/notifications");
+      await sendUnpaidReleaseSummary(ids);
+    } catch (e) {
+      console.error("[Ön ödeme iptali özeti gönderilemedi]", e);
+    }
+  }
+
+  return { cancelled: ids.length, ids, failed };
 }

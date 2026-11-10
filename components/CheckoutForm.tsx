@@ -8,7 +8,6 @@ import {
   RoomPlan,
   genderLabel,
   bandLabel,
-  bandAgeText,
   fareBandLabel,
   fareBandAgeText,
   passengerFareBand,
@@ -24,6 +23,10 @@ import {
   assignRooms,
   validateRooms,
   needsIdDocument,
+  depositFor,
+  balanceDueDateFor,
+  formatDate,
+  type PaymentPlan,
   ROOM_MAX_GUESTS,
 } from "@/lib/shared";
 import { COUNTRIES } from "@/lib/countries";
@@ -69,6 +72,8 @@ export default function CheckoutForm({
   hasAccommodation,
   initialRooms,
   currency,
+  depositPercent = 0,
+  balanceDueDays = 5,
 }: {
   tour: CheckoutTour;
   seats: SeatPick[];
@@ -89,6 +94,9 @@ export default function CheckoutForm({
   hasAccommodation: boolean;
   initialRooms?: string; // "2-1-0|1-0-1" — seçim adımından gelen oda dağılımı
   currency: string;
+  // Ön satış: oran 0 ise ödeme planı seçimi gösterilmez (yalnız peşin).
+  depositPercent?: number;
+  balanceDueDays?: number;
 }) {
   const isSeat = tour.bookingType === "KOLTUK";
   const count = isSeat ? seats.length : quantity;
@@ -153,6 +161,16 @@ export default function CheckoutForm({
     rooms: hasAccommodation ? rooms : undefined,
     singleSupplement,
   });
+
+  // Ödeme planı: peşin mi, ön ödeme (kapora) ile rezerve mi. Yalnız turda ön
+  // ödeme açıksa seçilebilir; sunucu da aynı kuralı doğrular.
+  const depositEnabled = depositPercent > 0;
+  const [plan, setPlan] = useState<PaymentPlan>("FULL");
+  const effectivePlan: PaymentPlan = depositEnabled ? plan : "FULL";
+  const depositAmount = depositEnabled ? depositFor(priced.total, depositPercent) : 0;
+  const dueNow = effectivePlan === "DEPOSIT" ? depositAmount : priced.total;
+  const remaining = Math.max(0, priced.total - dueNow);
+  const balanceDue = balanceDueDateFor(departureDate, balanceDueDays);
 
   const input =
     "mt-1 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand";
@@ -231,6 +249,11 @@ export default function CheckoutForm({
       {departureId && <input type="hidden" name="departureId" value={departureId} />}
       <input type="hidden" name="rooms" value={hasAccommodation ? encodeRooms(rooms) : ""} />
       <input type="hidden" name="faturaYolcu" value={String(faturaYolcu)} />
+      <input
+        type="hidden"
+        name="odemePlani"
+        value={effectivePlan === "DEPOSIT" ? "ON_ODEME" : "PESIN"}
+      />
       {docs.map((d, i) => (
         <input key={`d${i}`} type="hidden" name={`p_${i}_doc`} value={d} />
       ))}
@@ -528,6 +551,52 @@ export default function CheckoutForm({
           <span>Toplam</span>
           <span className="text-accent">{formatPrice(priced.total, currency)}</span>
         </div>
+
+        {/* Ödeme planı — ön ödeme açık turlarda müşteri seçer */}
+        {depositEnabled && (
+          <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
+            <p className="text-sm font-bold text-brand">Ödeme Seçeneği</p>
+            <PlanOption
+              selected={effectivePlan === "FULL"}
+              onSelect={() => setPlan("FULL")}
+              title="Peşin öde"
+              amount={formatPrice(priced.total, currency)}
+              hint="Tutarın tamamını şimdi ödeyin, rezervasyonunuz kesinleşsin."
+            />
+            <PlanOption
+              selected={effectivePlan === "DEPOSIT"}
+              onSelect={() => setPlan("DEPOSIT")}
+              title={`Ön ödeme ile rezerve et (%${depositPercent})`}
+              amount={formatPrice(depositAmount, currency)}
+              hint={`Koltuğunuz hemen ayrılır. Kalan ${formatPrice(
+                Math.max(0, priced.total - depositAmount),
+                currency
+              )} en geç ${formatDate(balanceDue.toISOString())} tarihine kadar ödenmelidir.`}
+            />
+            {effectivePlan === "DEPOSIT" && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Son ödeme tarihine kadar tamamlanmayan rezervasyonlar iptal edilir ve
+                koltuk hakkı diğer misafirlerin rezervasyonuna açılır. Kalan ödemeyi
+                e-postanıza gelecek bağlantıdan ya da acentemiz üzerinden
+                yapabilirsiniz.
+              </p>
+            )}
+            <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <span className="font-medium text-slate-600">Şimdi ödenecek</span>
+              <span className="font-extrabold text-accent">
+                {formatPrice(dueNow, currency)}
+              </span>
+            </div>
+            {remaining > 0 && (
+              <div className="flex items-center justify-between px-3 text-xs text-slate-500">
+                <span>Kalan (son ödeme {formatDate(balanceDue.toISOString())})</span>
+                <span className="font-semibold text-slate-700">
+                  {formatPrice(remaining, currency)}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         {earnPoints > 0 &&
           (loggedIn ? (
             <p className="mt-4 flex items-center justify-center gap-1.5 rounded-lg bg-accent/5 px-3 py-2 text-center text-xs font-medium text-accent">
@@ -549,7 +618,7 @@ export default function CheckoutForm({
           disabled={Boolean(roomsError) || roomsCountMismatch !== 0 || !consentOk}
           className="mt-4 w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition enabled:hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Ödemeye Geç
+          Ödemeye Geç{depositEnabled ? ` · ${formatPrice(dueNow, currency)}` : ""}
         </button>
         {!consentOk && (
           <p className="mt-2 text-center text-[11px] font-medium text-slate-500">
@@ -561,6 +630,38 @@ export default function CheckoutForm({
         </p>
       </aside>
     </form>
+  );
+}
+
+// Ödeme planı seçeneği (peşin / ön ödeme).
+function PlanOption({
+  selected,
+  onSelect,
+  title,
+  amount,
+  hint,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  title: string;
+  amount: string;
+  hint: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`w-full rounded-xl border-2 p-3 text-left transition ${
+        selected ? "border-accent bg-accent/5" : "border-slate-200 hover:border-slate-300"
+      }`}
+    >
+      <span className="flex items-center justify-between gap-2">
+        <span className="text-sm font-bold text-slate-800">{title}</span>
+        <span className="shrink-0 text-sm font-extrabold text-accent">{amount}</span>
+      </span>
+      <span className="mt-1 block text-xs leading-relaxed text-slate-500">{hint}</span>
+    </button>
   );
 }
 

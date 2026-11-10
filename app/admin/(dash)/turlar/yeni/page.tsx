@@ -1,6 +1,7 @@
 import TourForm from "@/components/admin/TourForm";
 import { createTour } from "@/lib/admin-actions";
 import { getActiveAmenities, getBuses } from "@/lib/tours";
+import { DEFAULT_DEPOSIT_PERCENT, DEFAULT_BALANCE_DUE_DAYS } from "@/lib/shared";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,18 @@ export default async function NewTourPage({
       {hata && (
         <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{hata}</p>
       )}
-      <TourForm action={createTour} submitLabel="Turu Kaydet" amenities={amenities} buses={buses} />
+      {/* Yeni turlar acentenin standart ön satış koşullarıyla açılır (%25 /
+          5 gün); istenirse formda 0 yazılarak ön ödeme kapatılabilir. */}
+      <TourForm
+        action={createTour}
+        submitLabel="Turu Kaydet"
+        amenities={amenities}
+        buses={buses}
+        initial={{
+          depositPercent: DEFAULT_DEPOSIT_PERCENT,
+          balanceDueDays: DEFAULT_BALANCE_DUE_DAYS,
+        }}
+      />
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   isValidClockTime,
   isValidPhone,
   parseDepartureDate,
+  DEFAULT_BALANCE_DUE_DAYS,
 } from "@/lib/shared";
 import {
   createManualPaidBooking,
@@ -24,7 +25,14 @@ import {
   cancelBooking,
   cancelBookingByAdmin,
   changeBookingSeat,
+  ensureBalanceSchedule,
 } from "@/lib/booking";
+import {
+  recordCollection,
+  deleteCollection,
+  isCollectionMethod,
+  ensureBalanceToken,
+} from "@/lib/collections";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
 import { startPayment } from "@/lib/payment";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
@@ -179,6 +187,13 @@ export async function tourDataFromForm(
     backRowFull,
     hasAccommodation: str(fd, "hasAccommodation") === "on",
     singleSupplement: optNum(fd, "singleSupplement") ?? 2000,
+    // Ön satış: oran 0 ise bu turda ön ödeme seçeneği müşteriye gösterilmez.
+    // 1-100 aralığına kıstırılır (elle hazırlanmış istek %500 kapora yazamasın).
+    depositPercent: Math.min(100, Math.max(0, optNum(fd, "depositPercent") ?? 0)),
+    balanceDueDays: Math.min(
+      90,
+      Math.max(1, optNum(fd, "balanceDueDays") ?? DEFAULT_BALANCE_DUE_DAYS)
+    ),
     features: JSON.stringify(features),
     excludedFeatures: JSON.stringify(excludedFeatures),
     status: str(fd, "status") || "YAYINDA",
@@ -889,6 +904,12 @@ export async function createManualBooking(fd: FormData) {
   const totalOverride =
     totalRaw != null && totalRaw !== "" ? Number(totalRaw) : null;
 
+  // Şimdi ELDEN ALINAN tutar. Boş bırakılırsa tamamı tahsil edilmiş sayılır
+  // (peşin satış). Toplamdan küçükse rezervasyon açık bakiyeli kaydedilir.
+  const collectedRaw = fd.get("collectedAmount");
+  const collectedAmount =
+    collectedRaw != null && collectedRaw !== "" ? Number(collectedRaw) : null;
+
   const methodRaw = str(fd, "paymentMethod");
   const method: "NAKIT" | "HAVALE" | "KREDI_KARTI" =
     methodRaw === "HAVALE" || methodRaw === "KREDI_KARTI" ? methodRaw : "NAKIT";
@@ -903,6 +924,7 @@ export async function createManualBooking(fd: FormData) {
     seatCodes: tour!.bookingType === "KOLTUK" ? seatCodes : undefined,
     quantity: tour!.bookingType === "KONTENJAN" ? num(fd, "quantity") : undefined,
     totalOverride,
+    collectedAmount,
   };
 
   const back = (error: string) =>
@@ -930,7 +952,8 @@ export async function createManualBooking(fd: FormData) {
     try {
       ({ redirectUrl } = await startPayment({
         bookingId: card.bookingId,
-        amount: card.amount,
+        // Kısmi tahsilatta karttan yalnız alınan kısım çekilir.
+        amount: card.dueNow,
         currency: tour!.currency,
         contactName: base.contactName,
         contactEmail: base.contactEmail,
@@ -1117,4 +1140,125 @@ export async function toggleReview(id: string, active: boolean) {
   await prisma.review.update({ where: { id }, data: { active } });
   revalidatePath("/");
   revalidatePath("/admin/yorumlar");
+}
+
+// ---- TAHSİLAT (elden kısmi ödeme) ----
+//
+// Görevli parayı parça parça alır: "bugün 5.000 aldım" diye girer, kalan
+// bakiye kendiliğinden düşer. Yanlış giren satır silinebilir; bakiye her
+// değişiklikte defterden yeniden hesaplanır (bkz. lib/collections.ts).
+export async function addCollectionAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+
+  const bookingId = str(fd, "bookingId");
+  if (!bookingId) return { ok: false, error: "Rezervasyon belirtilmedi." };
+
+  const amount = Number(str(fd, "amount").replace(",", "."));
+  if (!Number.isFinite(amount) || amount === 0)
+    return { ok: false, error: "Geçerli bir tutar girin." };
+
+  const methodRaw = str(fd, "method") || "NAKIT";
+  if (!isCollectionMethod(methodRaw))
+    return { ok: false, error: "Geçersiz tahsilat yöntemi." };
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { status: true, totalAmount: true, paidAmount: true },
+  });
+  if (!booking) return { ok: false, error: "Rezervasyon bulunamadı." };
+  if (booking.status === "IPTAL")
+    return {
+      ok: false,
+      error: "İptal edilmiş rezervasyona tahsilat girilemez.",
+    };
+
+  // Fazla tahsilat kazara girilmiş bir fazladan hane olabilir; görevliyi
+  // uyarıp reddediyoruz. Gerçekten fazla ödeme alındıysa tutar düzeltilmeli.
+  if (amount > 0 && booking.paidAmount + amount > booking.totalAmount) {
+    const kalan = booking.totalAmount - booking.paidAmount;
+    return {
+      ok: false,
+      error: `Girilen tutar kalan bakiyeden (${kalan.toLocaleString("tr-TR")} ₺) büyük. Fazla tahsilat kaydedilemez — toplam tutarı güncellemeniz gerekiyor olabilir.`,
+    };
+  }
+
+  const res = await recordCollection({
+    bookingId,
+    amount,
+    method: methodRaw,
+    note: str(fd, "note"),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  // Bakiye açık kaldıysa son ödeme tarihi / kalan ödeme bağlantısı tanımlanır.
+  await ensureBalanceSchedule(bookingId);
+
+  revalidatePath("/admin/rezervasyonlar");
+  revalidatePath(`/admin/rezervasyonlar/${bookingId}`);
+  revalidatePath("/admin");
+  revalidatePath("/hesabim", "layout");
+
+  return {
+    ok: true,
+    message:
+      res.balance > 0
+        ? `Tahsilat kaydedildi. Kalan bakiye: ${res.balance.toLocaleString("tr-TR")} ₺.`
+        : "Tahsilat kaydedildi. Ödeme tamamlandı — müşteriye bilgi e-postası gönderildi.",
+  };
+}
+
+export async function deleteCollectionAction(id: string) {
+  await requireAdmin();
+  const res = await deleteCollection(id);
+  if (res.bookingId) {
+    revalidatePath("/admin/rezervasyonlar");
+    revalidatePath(`/admin/rezervasyonlar/${res.bookingId}`);
+    revalidatePath("/admin");
+  }
+  if (!res.ok) throw new Error(res.error ?? "Tahsilat silinemedi.");
+}
+
+// Kalan ödeme bağlantısını üret/döndür — görevli müşteriye WhatsApp ile
+// gönderebilsin diye.
+export async function createBalanceLinkAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const bookingId = str(fd, "bookingId");
+  if (!bookingId) return { ok: false, error: "Rezervasyon belirtilmedi." };
+
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { totalAmount: true, paidAmount: true, status: true },
+  });
+  if (!booking) return { ok: false, error: "Rezervasyon bulunamadı." };
+  if (booking.status !== "ODENDI")
+    return { ok: false, error: "Yalnızca geçerli rezervasyonlar için bağlantı üretilir." };
+  if (booking.paidAmount >= booking.totalAmount)
+    return { ok: false, error: "Bu rezervasyonun açık bakiyesi yok." };
+
+  await ensureBalanceToken(bookingId);
+  revalidatePath(`/admin/rezervasyonlar/${bookingId}`);
+  return { ok: true, message: "Kalan ödeme bağlantısı hazır." };
+}
+
+// ---- TATİL & OTEL TALEPLERİ ----
+
+export async function setInquiryStatus(id: string, status: string) {
+  await requireAdmin();
+  await prisma.hotelInquiry.update({
+    where: { id },
+    data: { status: status === "ARANDI" ? "ARANDI" : "YENI" },
+  });
+  revalidatePath("/admin/talepler");
+}
+
+export async function deleteInquiry(id: string) {
+  await requireAdmin();
+  await prisma.hotelInquiry.delete({ where: { id } });
+  revalidatePath("/admin/talepler");
 }

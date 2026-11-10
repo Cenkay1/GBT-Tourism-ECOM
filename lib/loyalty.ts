@@ -66,6 +66,10 @@ export async function awardLoyaltyForBooking(bookingId: string): Promise<void> {
   if (!booking.userId) return; // misafir rezervasyon → puan yok
   if (booking.loyaltyAwardedAt) return; // zaten yazılmış
   if (booking.status !== "ODENDI") return; // yalnızca ödenmiş
+  // Açık bakiye varsa puan YAZILMAZ: puan ödenen paranın karşılığıdır, ön
+  // ödemeyle tur ücretinin tamamı kadar puan verilmesi hatalı olur. Bakiye
+  // kapanınca lib/collections.ts bu fonksiyonu yeniden çağırır.
+  if (booking.paidAmount < booking.totalAmount) return;
 
   const points = earnedFor(booking.totalAmount);
   if (points <= 0) {

@@ -88,6 +88,8 @@ export default async function EditTourPage({
     backRowFull: t.backRowFull ?? false,
     hasAccommodation: t.hasAccommodation ?? false,
     singleSupplement: t.singleSupplement ?? 2000,
+    depositPercent: t.depositPercent ?? 0,
+    balanceDueDays: t.balanceDueDays ?? 5,
     busId: t.busId ?? undefined,
     documents: parseDocs(t.documents),
     features: JSON.parse(t.features || "[]"),

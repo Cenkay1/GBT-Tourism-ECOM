@@ -163,7 +163,14 @@ export async function startPayment(
 // ── Callback doğrulama ──────────────────────────────────────────────────────
 
 export type CallbackResult =
-  | { ok: true; bookingId: string; paymentId: string }
+  | {
+      ok: true;
+      bookingId: string;
+      paymentId: string;
+      // Bu işlemde iyzico'nun TAHSİL ETTİĞİ (ve bizim beklediğimiz) tutar.
+      // Ön ödemeli satışta rezervasyonun toplamından küçüktür.
+      amount: number;
+    }
   | { ok: false; bookingId?: string; error: string };
 
 // iyzico'nun callback'ine gelen token'dan ödemeyi doğrular.
@@ -174,7 +181,14 @@ export type CallbackResult =
 //   1. retrieveCheckoutForm → durumu iyzico söyler, istek sahibi değil
 //   2. imza doğrulaması      → yanıtın gerçekten iyzico'dan geldiğini kanıtlar
 //   3. basketId              → hangi rezervasyon olduğunu iyzico söyler (token takasını kapatır)
-//   4. tutar karşılaştırma   → veritabanındaki tutarla ayrışmayı yakalar
+//   4. tutar karşılaştırma   → BİZİM istediğimiz tutarla ayrışmayı yakalar
+//
+// (4) için karşılaştırma tabanı Payment satırıdır, Booking.totalAmount DEĞİL:
+// ön ödemeli satışta karttan rezervasyonun toplamı değil kapora çekilir, kalan
+// ödemede ise bakiye çekilir. "Ne kadar istedik" sorusunun cevabı ödeme
+// başlatılırken yazdığımız Payment.amount'tır; müşterinin oynayabileceği bir
+// değer değildir. Payment satırı bulunamazsa (elle silinmiş) toplam tutara
+// düşülür — eski davranış.
 export async function verifyIyzicoCallback(token: string): Promise<CallbackResult> {
   const creds = iyzicoCredentials();
   if (!creds) return { ok: false, error: "iyzico yapılandırılmamış." };
@@ -210,6 +224,8 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
   }
 
   const paymentRecord = await prisma.payment.findUnique({ where: { token } });
+  // Beklenen tutar: ödemeyi başlatırken yazdığımız tutar.
+  const expectedAmount = paymentRecord?.amount ?? booking.totalAmount;
 
   const failed = async (error: string, extra?: Record<string, unknown>) => {
     if (paymentRecord) {
@@ -237,11 +253,11 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
   const reportedPrice = Number(res.price);
   if (
     !Number.isFinite(reportedPrice) ||
-    Math.round(reportedPrice * 100) !== booking.totalAmount * 100
+    Math.round(reportedPrice * 100) !== expectedAmount * 100
   ) {
     console.error("[iyzico tutar uyuşmazlığı]", {
       bookingId,
-      beklenen: booking.totalAmount,
+      beklenen: expectedAmount,
       gelen: res.price,
     });
     return failed("Ödeme tutarı rezervasyonla uyuşmuyor.");
@@ -282,7 +298,7 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
         token,
         paymentId,
         status: "BASARILI",
-        amount: booking.totalAmount,
+        amount: expectedAmount,
         paidAmount: Number.isFinite(paidAmount) ? Math.round(paidAmount) : null,
         currency: res.currency ?? "TRY",
         installment: res.installment ?? null,
@@ -293,5 +309,5 @@ export async function verifyIyzicoCallback(token: string): Promise<CallbackResul
     });
   }
 
-  return { ok: true, bookingId, paymentId };
+  return { ok: true, bookingId, paymentId, amount: expectedAmount };
 }

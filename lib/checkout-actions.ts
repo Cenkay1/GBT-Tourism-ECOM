@@ -73,6 +73,9 @@ export async function submitCheckout(fd: FormData) {
     rooms: s(fd, "rooms") || undefined,
     invoicePassengerIndex: Number(s(fd, "faturaYolcu")) || 0,
     consent: consentCheck.consent,
+    // Ödeme planı: "ON_ODEME" seçildiyse kapora ile rezerve. Geçerliliği
+    // (turda ön ödeme açık mı) sunucuda createPendingBooking denetler.
+    paymentPlan: s(fd, "odemePlani") === "ON_ODEME" ? "DEPOSIT" : "FULL",
   });
 
   if (!result.ok) {
@@ -91,7 +94,8 @@ export async function submitCheckout(fd: FormData) {
   try {
     ({ redirectUrl } = await startPayment({
       bookingId: result.bookingId,
-      amount: result.amount,
+      // Ön ödemeli satışta karttan rezervasyonun toplamı DEĞİL kapora çekilir.
+      amount: result.dueNow,
       currency: tour?.currency ?? "TRY",
       contactName: s(fd, "contactName"),
       contactEmail: s(fd, "contactEmail"),
