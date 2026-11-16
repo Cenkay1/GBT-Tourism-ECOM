@@ -6,6 +6,8 @@ import { prisma } from "@/lib/db";
 import { cancelBooking, createPendingBooking, PassengerInput } from "@/lib/booking";
 import { startPayment } from "@/lib/payment";
 import { getCurrentUser } from "@/lib/session";
+import { currentCartToken } from "@/lib/cart-actions";
+import { extendHoldForPayment } from "@/lib/booking";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
 
 function s(fd: FormData, k: string): string {
@@ -88,6 +90,10 @@ export async function submitCheckout(fd: FormData) {
     // Geçersiz kodda rezervasyon açılmaz — müşteri indirim bekleyip tam
     // ücret ödemesin.
     couponCode: s(fd, "kuponKodu") || undefined,
+    // Sepet anahtarı: koltuklar "Sepete Ekle" ile zaten kilitlendi, bu
+    // rezervasyon o kilidi devralacak. Olmadan koltuklar "başkası tutuyor"
+    // sayılır ve satış reddedilirdi.
+    cartToken: (await currentCartToken()) ?? undefined,
   });
 
   if (!result.ok) {
@@ -127,6 +133,13 @@ export async function submitCheckout(fd: FormData) {
   const proto = h.get("x-forwarded-proto") ?? "http";
   const host = h.get("host") ?? "localhost:3000";
   const baseUrl = `${proto}://${host}`;
+
+  // Ödeme sayfasına geçmeden tutma penceresini uzat: 3D Secure ekranında
+  // süre dolarsa para çekilip koltuk gidebilirdi (bkz. extendHoldForPayment).
+  await extendHoldForPayment(result.bookingId).catch(() => {
+    // Uzatma başarısız olsa bile ödemeye devam edilir; en kötü durumda
+    // mevcut pencere geçerli kalır.
+  });
 
   let redirectUrl: string;
   try {

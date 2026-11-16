@@ -23,6 +23,8 @@ import CancelBookingButton from "@/components/admin/CancelBookingButton";
 import ChangeSeatForm from "@/components/admin/ChangeSeatForm";
 import InvoiceRetryButton from "@/components/admin/InvoiceRetryButton";
 import CollectionPanel from "@/components/admin/CollectionPanel";
+import TransferPanel from "@/components/admin/TransferPanel";
+import { canTransferBooking, listTransfers } from "@/lib/transfer";
 import {
   UsersIcon,
   PhoneIcon,
@@ -91,6 +93,32 @@ export default async function BookingDetail({
     },
   });
   if (!b) notFound();
+
+  // --- Devir verisi ------------------------------------------------------
+  const transferEligibility = await canTransferBooking(b.id);
+  const transferHistory = await listTransfers(b.id);
+  // Başka tura devir için hedef seçenekleri: yayında, tarihi geçmemiş,
+  // satışa açık seferleri olan turlar. Kaynak turun kendisi listede yok.
+  const transferTours = await prisma.tour.findMany({
+    where: {
+      status: "YAYINDA",
+      id: { not: b.tourId },
+      departures: { some: { status: "AKTIF", departureDate: { gt: new Date() } } },
+    },
+    orderBy: { departureDate: "asc" },
+    select: {
+      id: true,
+      title: true,
+      price: true,
+      currency: true,
+      departures: {
+        where: { status: "AKTIF", departureDate: { gt: new Date() } },
+        orderBy: { departureDate: "asc" },
+        select: { id: true, departureDate: true },
+      },
+    },
+    take: 50,
+  });
 
   // Tahsilat durumu: açık bakiye ve kalan ödeme bağlantısı.
   const balance = balanceOf(b.totalAmount, b.paidAmount);
@@ -250,6 +278,40 @@ export default async function BookingDetail({
               </div>
             )}
           </section>
+
+          {/* Devir — yolcu değişimi, başka tura aktarma, fiyat farkı */}
+          <TransferPanel
+            bookingId={b.id}
+            canTransfer={transferEligibility.ok}
+            blockReason={transferEligibility.ok ? undefined : transferEligibility.error}
+            passengers={b.passengers.map((p) => ({
+              id: p.id,
+              label: `${p.seatCode ? p.seatCode + " · " : ""}${p.firstName} ${p.lastName}`,
+              seatCode: p.seatCode,
+              ageBandLabel: bandLabelOf((p.ageBand as AgeBand | null) ?? "ADULT"),
+            }))}
+            tours={transferTours.map((t) => ({
+              id: t.id,
+              title: `${t.title} — ${formatPrice(t.price, t.currency)}`,
+              departures: t.departures.map((d) => ({
+                id: d.id,
+                label: formatDate(d.departureDate.toISOString()),
+              })),
+            }))}
+            history={transferHistory.map((t) => ({
+              id: t.id,
+              fromName: `${t.fromFirstName} ${t.fromLastName}`,
+              toName: `${t.toFirstName} ${t.toLastName}`,
+              toPhone: t.toPhone,
+              seatCode: t.seatCode,
+              priceDifference: t.priceDifference,
+              differenceStatus: t.differenceStatus,
+              actor: t.actor,
+              createdAt: formatDate(t.createdAt.toISOString()),
+              targetBookingId: t.targetBookingId,
+              currency: b.tour.currency,
+            }))}
+          />
 
           {/* Tahsilat — ön satış bakiyesi ve elden kısmi ödemeler */}
           <CollectionPanel

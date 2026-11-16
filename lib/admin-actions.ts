@@ -55,6 +55,11 @@ import {
   type TrashModel,
 } from "@/lib/trash";
 import { createAdminCoupon, adjustUserPoints } from "@/lib/coupons";
+import {
+  transferPassenger,
+  settleTransferDifference,
+  type TransferTarget,
+} from "@/lib/transfer";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
 import { startPayment } from "@/lib/payment";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
@@ -1195,6 +1200,116 @@ export async function deleteBooking(id: string) {
   revalidatePath("/turlar", "layout");
   revalidatePath("/");
   redirect("/admin/rezervasyonlar");
+}
+
+// ---- DEVİR ----
+//
+// Admin devri müşteri devriyle AYNI kurallara tabi (lib/transfer.ts): ödenmiş
+// + bakiyesiz + kalkışa 24 saatten fazla + aynı yaş bandı. Admin'in ek
+// yetkisi BAŞKA TURA devir yapabilmesi ve fiyat farkını kapatabilmesi.
+
+export interface AdminTransferState extends FormState {
+  suggestedSeats?: string[];
+  priceDifference?: number;
+}
+
+export async function adminTransferAction(
+  _prev: AdminTransferState,
+  fd: FormData
+): Promise<AdminTransferState> {
+  await requireAdmin();
+  const email = (await getSessionEmail()) ?? "admin";
+
+  const bookingId = str(fd, "bookingId");
+  const passengerId = str(fd, "passengerId");
+  if (!bookingId || !passengerId)
+    return { ok: false, error: "Rezervasyon ve yolcu seçilmeli." };
+
+  const nat = str(fd, "nationality") === "FOREIGN" ? "FOREIGN" : "TC";
+  const to: TransferTarget = {
+    firstName: str(fd, "firstName"),
+    lastName: str(fd, "lastName"),
+    email: str(fd, "email"),
+    phone: str(fd, "phone"),
+    gender: str(fd, "gender") === "K" ? "K" : "E",
+    idNumber: str(fd, "idNumber"),
+    nationality: nat,
+    country: nat === "FOREIGN" ? str(fd, "country") : "Türkiye",
+    birthDate: str(fd, "birthDate") || undefined,
+  };
+
+  // Hedef tur seçilmişse BAŞKA tura devir; boşsa aynı turda.
+  const targetTourId = str(fd, "targetTourId") || undefined;
+  const targetDepartureId = str(fd, "targetDepartureId") || undefined;
+  if (targetTourId && !targetDepartureId)
+    return { ok: false, error: "Hedef turun seferini seçin." };
+
+  const res = await transferPassenger({
+    bookingId,
+    passengerId,
+    to,
+    newSeatCode: str(fd, "newSeatCode") || undefined,
+    targetTourId,
+    targetDepartureId,
+    actor: "ADMIN",
+    actorEmail: email,
+    note: str(fd, "note"),
+  });
+  if (!res.ok)
+    return { ok: false, error: res.error, suggestedSeats: res.suggestedSeats };
+
+  try {
+    const { sendTransferReceived, sendTransferSent, sendTransferAdminNotice } = await import(
+      "@/lib/notifications"
+    );
+    await sendTransferReceived(res.transferId);
+    await sendTransferSent(res.transferId);
+    await sendTransferAdminNotice(res.transferId);
+  } catch (e) {
+    console.error("[Devir bildirimi gönderilemedi]", e);
+  }
+
+  revalidatePath("/admin/rezervasyonlar");
+  revalidatePath(`/admin/rezervasyonlar/${bookingId}`);
+  if (res.targetBookingId) revalidatePath(`/admin/rezervasyonlar/${res.targetBookingId}`);
+  revalidatePath("/admin/turlar", "layout");
+  revalidatePath("/turlar", "layout");
+  revalidatePath("/hesabim", "layout");
+
+  const farkMesaji =
+    res.priceDifference > 0
+      ? ` Müşteri ${res.priceDifference.toLocaleString("tr-TR")} ₺ borçlu — fark tahsil edilmeli.`
+      : res.priceDifference < 0
+      ? ` Müşteriye ${Math.abs(res.priceDifference).toLocaleString("tr-TR")} ₺ iade edilecek (7 iş günü).`
+      : "";
+
+  return {
+    ok: true,
+    message: `Devir tamamlandı ve taraflara e-posta gönderildi.${farkMesaji}`,
+    priceDifference: res.priceDifference,
+  };
+}
+
+// Fiyat farkını kapat: borcu tahsil et ya da iadeyi işaretle.
+export async function settleTransferAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const transferId = str(fd, "transferId");
+  if (!transferId) return { ok: false, error: "Devir kaydı belirtilmedi." };
+
+  const methodRaw = str(fd, "method");
+  const method = isCollectionMethod(methodRaw) ? methodRaw : "NAKIT";
+
+  const res = await settleTransferDifference(transferId, {
+    method,
+    note: str(fd, "note") || undefined,
+  });
+  if (!res.ok) return { ok: false, error: res.error ?? "Fark kapatılamadı." };
+
+  revalidatePath("/admin/rezervasyonlar");
+  return { ok: true, message: "Fiyat farkı kapatıldı ve tahsilat defterine işlendi." };
 }
 
 // ---- KUPON VE PUAN ----

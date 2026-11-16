@@ -136,9 +136,23 @@ model Seat {
   code        String
   status      String         @default("BOS") // BOS | KILITLI | SATILDI | BLOKE
   gender      String? // E | K — dolu koltuğun yolcu cinsiyeti (yan yana kuralı için)
+  // --- Sepet kilidi -------------------------------------------------------
+  // Müşteri koltuğu sepete eklediğinde koltuk KILITLI olur ve bu iki alan
+  // dolar: holdToken çerezdeki sepet anahtarı, holdExpiresAt kilidin bitiş
+  // anı. Rezervasyon açılınca ikisi de temizlenir ve kilidi
+  // Booking.holdExpiresAt devralır.
+  //
+  // Kilit iki kaynaktan gelebilir ve BU ALANLA ayrışır:
+  //   • Sepet kilidi:        KILITLI + holdToken dolu + holdExpiresAt dolu
+  //   • Rezervasyon kilidi:  KILITLI + holdToken null  + holdExpiresAt null
+  // Süpürme (releaseExpiredHolds) yalnız holdExpiresAt dolu satırlara
+  // dokunur; aksi halde ödeme bekleyen rezervasyonların koltukları boşalırdı.
+  holdToken     String?
+  holdExpiresAt DateTime?
 
   @@unique([departureId, code])
   @@index([tourId])
+  @@index([holdToken])
 }
 
 model Booking {
@@ -197,12 +211,20 @@ model Booking {
   couponId              String?        @unique
   coupon                Coupon?        @relation(fields: [couponId], references: [id])
   couponAmount          Int            @default(0)
+  // Sahipliğin bu kişiye geçtiği an. Devirde kullanılıyor: bu tarihten SONRA
+  // devredilmemiş yolcu kalmadıysa rezervasyonun sahibi de değişir. Zincirleme
+  // devirlerde (A→B→C) doğru sonuç vermesi için tarih karşılaştırması şart.
+  ownerSince            DateTime?
   createdAt             DateTime       @default(now())
 
   passengers  Passenger[]
   payments    Payment[]
   collections Collection[]
   invoice     Invoice?
+  // Bu rezervasyonDAN yapılan devirler (yolcusu başkasına geçti) ve bu
+  // rezervasyonA gelen devirler (başka tura devirde yeni rezervasyon açılır).
+  transfersOut BookingTransfer[] @relation("TransferSource")
+  transfersIn  BookingTransfer[] @relation("TransferTarget")
 }
 
 // Tahsilat kaydı — bir rezervasyon için ALINAN para hareketi.
@@ -297,6 +319,8 @@ model User {
   savedPassengers SavedPassenger[]
   waitlist        Waitlist[]
   coupons         Coupon[]
+  transfersOut    BookingTransfer[] @relation("TransfersFrom")
+  transfersIn     BookingTransfer[] @relation("TransfersTo")
 }
 
 // Yedek liste kaydı — otobüs/kontenjan DOLUYKEN alınan koltuksuz talep.
@@ -407,6 +431,68 @@ model PointsLedger {
   reason    String // KAZANIM | HOSGELDIN | DUZELTME | IPTAL | KUPON | KUPON_IPTAL
   note      String   @default("")
   createdAt DateTime @default(now())
+}
+
+// Rezervasyon devri — bir yolcunun yerini başka kişiye bırakması.
+//
+// Neden ayrı tablo ve yeni bir Booking.status DEĞİL: devredilen rezervasyon
+// hâlâ GEÇERLİ ve ödenmiş bir rezervasyondur, yalnız yolcusu (ve bazen sahibi)
+// değişir. "DEVREDILDI" gibi bir durum eklenseydi status filtreleyen her yerin
+// (ciro, kontenjan, koltuk tahtası, hatırlatma, Excel, fatura) onu öğrenmesi
+// gerekirdi.
+//
+// İki devir biçimi var:
+//   • AYNI tura devir: yolcu satırı yerinde güncellenir, koltuk korunur.
+//     targetBookingId boş kalır.
+//   • BAŞKA tura devir: hedef turda YENİ rezervasyon açılır, yolcu oraya
+//     taşınır ve kaynak rezervasyondaki yeri boşaltılır. Fiyat farkı
+//     priceDifference'a yazılır: artı = müşteri borçlu, eksi = iade edilecek.
+model BookingTransfer {
+  id        String  @id @default(cuid())
+  bookingId String // devrin yapıldığı (kaynak) rezervasyon
+  booking   Booking @relation("TransferSource", fields: [bookingId], references: [id], onDelete: Cascade)
+
+  // BAŞKA tura devirde oluşan yeni rezervasyon (aynı tura devirde null).
+  targetBookingId String?
+  targetBooking   Booking? @relation("TransferTarget", fields: [targetBookingId], references: [id])
+
+  passengerId String? // devredilen yolcu satırı
+  seatCode    String? // devir anındaki koltuk (anlık kopya)
+
+  // Devreden — yolcu satırı artık yeni kişiyi tuttuğu için kimlik buraya kopyalanır.
+  fromFirstName String
+  fromLastName  String
+  fromIdNumber  String?
+  fromEmail     String
+  fromUserId    String?
+  fromUser      User?   @relation("TransfersFrom", fields: [fromUserId], references: [id])
+
+  // Devredilen kişi
+  toFirstName String
+  toLastName  String
+  toEmail     String
+  toPhone     String
+  toUserId    String?
+  toUser      User?   @relation("TransfersTo", fields: [toUserId], references: [id])
+
+  // Fiyat farkı (kuruşsuz TL). + = müşteri EK ÖDEME yapacak (borç),
+  // - = müşteriye İADE edilecek, 0 = fark yok. Aynı tura devirde her zaman 0
+  // (aynı yaş bandı şartı tutarı değiştirmiyor).
+  priceDifference Int    @default(0)
+  // Fark nasıl kapandı: YOK | BEKLIYOR | ODENDI | IADE_BEKLIYOR | IADE_EDILDI
+  differenceStatus String @default("YOK")
+  // Borç ödemesi için müşteriye verilen gizli bağlantı anahtarı.
+  differenceToken  String? @unique
+
+  actor          String // MUSTERI | ADMIN
+  actorEmail     String
+  ownershipMoved Boolean @default(false)
+  note           String  @default("")
+  createdAt      DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([fromUserId])
+  @@index([targetBookingId])
 }
 
 // İndirim kuponu — ödemede girilerek tutardan düşülen TL değeri.

@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import Header from "@/components/Header";
 import HeaderAccount from "@/components/HeaderAccount";
+import HeaderCart from "@/components/HeaderCart";
 import Footer from "@/components/Footer";
 import WhatsAppButton from "@/components/WhatsAppButton";
 import HideOnAdmin from "@/components/HideOnAdmin";
@@ -56,7 +57,7 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col">
         <HideOnAdmin>
-          <Header account={<HeaderAccount />} />
+          <Header account={<HeaderAccount />} cart={<HeaderCart />} />
         </HideOnAdmin>
         <main className="flex-1">{children}</main>
         <HideOnAdmin>

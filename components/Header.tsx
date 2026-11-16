@@ -13,7 +13,14 @@ const links = [
   { href: "/iletisim", label: "İletişim" },
 ];
 
-export default function Header({ account }: { account?: React.ReactNode }) {
+export default function Header({
+  account,
+  cart,
+}: {
+  account?: React.ReactNode;
+  // Sepet rozeti sunucudan geliyor (çerezi orada okuyoruz).
+  cart?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -57,6 +64,9 @@ export default function Header({ account }: { account?: React.ReactNode }) {
             <PhoneIcon width={16} height={16} />
             <span className="hidden sm:inline">{COMPANY.phones[0]}</span>
           </a>
+
+          {/* Sepet: tutulan koltuklar + geri sayım (sunucudan) */}
+          {cart}
 
           {/* Hesap: giriş bağlantısı ya da kullanıcı menüsü (sunucudan) */}
           {account}

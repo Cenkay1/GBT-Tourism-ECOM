@@ -380,6 +380,55 @@ async function main() {
     console.log("  = Coupon tablosu zaten var");
   }
 
+  // BookingTransfer — rezervasyon devirleri (yolcu değişimi, başka tura devir).
+  if (!(await tableExists("BookingTransfer"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "BookingTransfer" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "bookingId" TEXT NOT NULL,
+        "targetBookingId" TEXT,
+        "passengerId" TEXT,
+        "seatCode" TEXT,
+        "fromFirstName" TEXT NOT NULL,
+        "fromLastName" TEXT NOT NULL,
+        "fromIdNumber" TEXT,
+        "fromEmail" TEXT NOT NULL,
+        "fromUserId" TEXT,
+        "toFirstName" TEXT NOT NULL,
+        "toLastName" TEXT NOT NULL,
+        "toEmail" TEXT NOT NULL,
+        "toPhone" TEXT NOT NULL,
+        "toUserId" TEXT,
+        "priceDifference" INTEGER NOT NULL DEFAULT 0,
+        "differenceStatus" TEXT NOT NULL DEFAULT 'YOK',
+        "differenceToken" TEXT,
+        "actor" TEXT NOT NULL,
+        "actorEmail" TEXT NOT NULL,
+        "ownershipMoved" BOOLEAN NOT NULL DEFAULT false,
+        "note" TEXT NOT NULL DEFAULT '',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "BookingTransfer_bookingId_fkey" FOREIGN KEY ("bookingId")
+          REFERENCES "Booking" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "BookingTransfer_targetBookingId_fkey" FOREIGN KEY ("targetBookingId")
+          REFERENCES "Booking" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+        CONSTRAINT "BookingTransfer_fromUserId_fkey" FOREIGN KEY ("fromUserId")
+          REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
+        CONSTRAINT "BookingTransfer_toUserId_fkey" FOREIGN KEY ("toUserId")
+          REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX "BookingTransfer_differenceToken_key" ON "BookingTransfer"("differenceToken")`
+    );
+    for (const col of ["bookingId", "fromUserId", "targetBookingId"]) {
+      await prisma.$executeRawUnsafe(
+        `CREATE INDEX "BookingTransfer_${col}_idx" ON "BookingTransfer"("${col}")`
+      );
+    }
+    console.log("  + BookingTransfer tablosu");
+  } else {
+    console.log("  = BookingTransfer tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {
@@ -454,6 +503,14 @@ async function main() {
 
   // User — üyelik aktif mi (admin "pasife al"). Mevcut üyeler aktif sayılır.
   await add("User", "active", `"active" BOOLEAN NOT NULL DEFAULT true`);
+
+  // Devir: sahipliğin bu kişiye geçtiği an (zincirleme devir hesabı için).
+  await add("Booking", "ownerSince", `"ownerSince" DATETIME`);
+
+  // Sepet kilidi: koltuk seçimde tutuluyor (15 dk). holdToken çerezdeki sepet
+  // anahtarı, holdExpiresAt kilidin bitişi. NULL = rezervasyon kilidi ya da boş.
+  await add("Seat", "holdToken", `"holdToken" TEXT`);
+  await add("Seat", "holdExpiresAt", `"holdExpiresAt" DATETIME`);
 
   // Kupon: rezervasyona bağlı indirim kuponu ve düşen tutar.
   await add("Booking", "couponId", `"couponId" TEXT`);

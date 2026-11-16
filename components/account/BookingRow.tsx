@@ -15,6 +15,12 @@ const statusStyle: Record<string, { label: string; cls: string }> = {
 export interface BookingRowData {
   id: string;
   status: string;
+  // Devir uygunluğu sunucuda hesaplanıp geçiliyor: buton yalnız devredilebilir
+  // rezervasyonlarda çıkar, değilse sebebi yazılır.
+  canTransfer?: boolean;
+  transferBlockReason?: string;
+  // Bu rezervasyonda kaç yolcu devredildi (kısmi devirde bilgi satırı).
+  transferredCount?: number;
   totalAmount: number;
   // Tahsil edilen tutar ve kalan ödeme bilgisi (ön ödemeli rezervasyonlar).
   paidAmount: number;
@@ -92,6 +98,33 @@ export default function BookingRow({ b }: { b: BookingRowData }) {
           )}
         </div>
       </div>
+
+      {/* Devredilen yolcu bilgisi (kısmi devir) */}
+      {(b.transferredCount ?? 0) > 0 && (
+        <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Bu rezervasyonda {b.transferredCount} yolcu başka kişiye devredildi.
+        </p>
+      )}
+
+      {/* Devret: yalnız uygun rezervasyonlarda; değilse sebebi yazılır */}
+      {b.status === "ODENDI" && balance === 0 && (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          {b.canTransfer ? (
+            <Link
+              href={`/hesabim/rezervasyonlarim/${b.id}/devret`}
+              className="inline-block rounded-lg border border-brand/30 px-3 py-1.5 text-xs font-bold text-brand transition hover:bg-slate-50"
+            >
+              Rezervasyonu Devret
+            </Link>
+          ) : (
+            b.transferBlockReason && (
+              <p className="text-xs text-slate-400">
+                Devir yapılamıyor: {b.transferBlockReason}
+              </p>
+            )
+          )}
+        </div>
+      )}
 
       {/* Açık bakiye: son ödeme tarihi ve ödeme bağlantısı */}
       {balance > 0 && (

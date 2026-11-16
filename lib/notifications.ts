@@ -733,6 +733,175 @@ export async function sendHotelInquiryNotice(inquiryId: string): Promise<boolean
   );
 }
 
+// --- Devir bildirimleri ---------------------------------------------------
+//
+// Üç e-posta: devredilene bilet bilgileri, devredene özet, acenteye "yolcu
+// listesi değişti" uyarısı (otel/manifest güncellemesi gerekebilir).
+
+async function transferContext(transferId: string) {
+  const t = await prisma.bookingTransfer.findUnique({
+    where: { id: transferId },
+    include: {
+      booking: { include: { tour: true, departure: true } },
+      targetBooking: { include: { tour: true, departure: true } },
+    },
+  });
+  if (!t) return null;
+  // Başka tura devirde geçerli bilgiler HEDEF rezervasyondan okunur.
+  const active = t.targetBooking ?? t.booking;
+  const dep = active.departure?.departureDate ?? active.tour.departureDate;
+  return { t, active, depText: fmtDateTime(dep) };
+}
+
+export async function sendTransferReceived(transferId: string): Promise<boolean> {
+  const ctx = await transferContext(transferId);
+  if (!ctx) return false;
+  const { t, active, depText } = ctx;
+
+  const fark =
+    t.priceDifference > 0
+      ? `<div style="background:#fffbeb;border-radius:10px;padding:16px;margin:16px 0">
+           <p style="font-size:14px;color:#92400e;margin:0">
+             <strong>Ödenmesi gereken fark: ${formatPrice(t.priceDifference, active.tour.currency)}</strong><br>
+             Devredilen tur daha yüksek tutarlı olduğu için aradaki farkın ödenmesi
+             gerekiyor. Ödeme bağlantısı bu e-postada aşağıda yer alıyor; fark
+             ödenmeden seyahat kesinleşmez.
+           </p>
+         </div>`
+      : t.priceDifference < 0
+      ? `<div style="background:#ecfdf5;border-radius:10px;padding:16px;margin:16px 0">
+           <p style="font-size:14px;color:#065f46;margin:0">
+             <strong>İade edilecek tutar: ${formatPrice(Math.abs(t.priceDifference), active.tour.currency)}</strong><br>
+             Devredilen tur daha düşük tutarlı olduğu için aradaki fark,
+             bankanıza bağlı olarak 7 iş günü içinde iade edilecektir.
+           </p>
+         </div>`
+      : "";
+
+  const odemeLinki =
+    t.priceDifference > 0 && t.differenceToken
+      ? `<p style="margin-top:16px">
+           <a href="${siteBaseUrl()}/devir-odeme/${escapeHtml(t.differenceToken)}"
+              style="display:inline-block;background:#d97706;color:#fff;text-decoration:none;
+                     padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px">
+             Fiyat Farkını Öde
+           </a>
+         </p>`
+      : "";
+
+  const html = emailShell(
+    "Rezervasyon size devredildi",
+    `<p style="font-size:14px;color:#475569">
+       Sayın ${escapeHtml(t.toFirstName)} ${escapeHtml(t.toLastName)},
+       ${escapeHtml(`${t.fromFirstName} ${t.fromLastName}`)} adlı misafirimiz
+       aşağıdaki rezervasyonu size devretti.
+     </p>
+     <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Tur:</strong> ${escapeHtml(active.tour.title)}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kalkış:</strong> ${escapeHtml(depText)}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kalkış Yeri:</strong> ${escapeHtml(active.tour.departureLocation)}</p>
+       ${t.seatCode ? `<p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Koltuk:</strong> ${escapeHtml(t.seatCode)}</p>` : ""}
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Rezervasyon No:</strong> ${active.id.slice(-8).toUpperCase()}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Tutar:</strong> ${formatPrice(active.totalAmount, active.tour.currency)}</p>
+     </div>
+     ${fark}
+     ${odemeLinki}
+     <p style="font-size:13px;color:#64748b;margin-top:16px">
+       Sorularınız için ${COMPANY_INFO.phones[0]} numarasından bize ulaşabilirsiniz.
+     </p>`
+  );
+
+  return sendEmail(
+    t.toEmail,
+    `${COMPANY} — Rezervasyon size devredildi (${active.tour.title})`,
+    html
+  );
+}
+
+export async function sendTransferSent(transferId: string): Promise<boolean> {
+  const ctx = await transferContext(transferId);
+  if (!ctx) return false;
+  const { t, active, depText } = ctx;
+
+  const iade =
+    t.priceDifference < 0
+      ? `<p style="font-size:14px;color:#065f46">
+           Aradaki ${formatPrice(Math.abs(t.priceDifference), active.tour.currency)} fark,
+           bankanıza bağlı olarak 7 iş günü içinde iade edilecektir.
+         </p>`
+      : "";
+
+  const html = emailShell(
+    "Devir işleminiz tamamlandı",
+    `<p style="font-size:14px;color:#475569">
+       ${escapeHtml(`${t.fromFirstName} ${t.fromLastName}`)} adına kayıtlı yer,
+       <strong>${escapeHtml(`${t.toFirstName} ${t.toLastName}`)}</strong> adlı kişiye devredildi.
+     </p>
+     <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Tur:</strong> ${escapeHtml(active.tour.title)}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kalkış:</strong> ${escapeHtml(depText)}</p>
+       ${t.seatCode ? `<p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Koltuk:</strong> ${escapeHtml(t.seatCode)}</p>` : ""}
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Devir tarihi:</strong> ${escapeHtml(fmtDateTime(t.createdAt))}</p>
+     </div>
+     ${iade}
+     <p style="font-size:13px;color:#64748b">
+       Bu devirle birlikte söz konusu yer için seyahat hakkınız sona ermiştir.
+       Devir sizin talebiniz dışında yapıldıysa lütfen hemen
+       ${COMPANY_INFO.phones[0]} numarasından bizi arayın.
+     </p>`
+  );
+
+  return sendEmail(
+    t.fromEmail,
+    `${COMPANY} — Devir işlemi tamamlandı (${active.tour.title})`,
+    html
+  );
+}
+
+export async function sendTransferAdminNotice(transferId: string): Promise<boolean> {
+  const ctx = await transferContext(transferId);
+  if (!ctx) return false;
+  const { t, active, depText } = ctx;
+
+  const farkText =
+    t.priceDifference > 0
+      ? `Müşteri ${formatPrice(t.priceDifference, active.tour.currency)} BORÇLU (tahsil edilmeli).`
+      : t.priceDifference < 0
+      ? `Müşteriye ${formatPrice(Math.abs(t.priceDifference), active.tour.currency)} İADE edilecek.`
+      : "Fiyat farkı yok.";
+
+  const html = emailShell(
+    "Yolcu listesi değişti — devir",
+    `<p style="font-size:14px;color:#475569">Bir rezervasyonda devir yapıldı.</p>
+     <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Tur:</strong> ${escapeHtml(active.tour.title)}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kalkış:</strong> ${escapeHtml(depText)}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Devreden:</strong> ${escapeHtml(`${t.fromFirstName} ${t.fromLastName}`)}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Devredilen:</strong> ${escapeHtml(`${t.toFirstName} ${t.toLastName}`)} · ${escapeHtml(t.toPhone)}</p>
+       ${t.seatCode ? `<p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Koltuk:</strong> ${escapeHtml(t.seatCode)}</p>` : ""}
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>İşlemi yapan:</strong> ${escapeHtml(t.actor === "ADMIN" ? "Görevli" : "Müşteri")} (${escapeHtml(t.actorEmail)})</p>
+       ${t.targetBookingId ? `<p style="font-size:14px;color:#92400e;margin:10px 0 0"><strong>BAŞKA TURA devir</strong> — yeni rezervasyon açıldı.</p>` : ""}
+     </div>
+     <p style="font-size:14px;color:#1a2550"><strong>${escapeHtml(farkText)}</strong></p>
+     <p style="font-size:13px;color:#64748b">
+       Otele/araç manifestine bildirilen yolcu listesi değiştiyse güncellenmesi gerekir.
+     </p>
+     <p style="margin-top:16px">
+       <a href="${siteBaseUrl()}/admin/rezervasyonlar/${active.id}"
+          style="display:inline-block;background:#22306a;color:#fff;text-decoration:none;
+                 padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px">
+         Rezervasyonu Aç
+       </a>
+     </p>`
+  );
+
+  return sendEmail(
+    adminNotifyEmail(),
+    `Devir — ${active.tour.title} · ${t.toFirstName} ${t.toLastName}`,
+    html
+  );
+}
+
 // --- Yedek liste bildirimleri --------------------------------------------
 //
 // Yedek kayıt bir rezervasyon DEĞİL: e-postada "ödeme alınmadı" ve "yer

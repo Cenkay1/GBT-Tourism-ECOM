@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { addToCartAction } from "@/lib/cart-actions";
+import { HOLD_MINUTES } from "@/lib/shared";
 import {
   Tour,
   TourDeparture,
@@ -54,7 +56,34 @@ export default function SeatMap({
   const [selected, setSelected] = useState<Picked[]>([]);
   const [picking, setPicking] = useState<string | null>(null);
   const [warning, setWarning] = useState<string>("");
+  const [adding, startAdding] = useTransition();
   const router = useRouter();
+
+  // Koltuklar "Sepete Ekle" ile SUNUCUDA kilitlenir; ardından rezervasyon
+  // formuna geçilir. Önceden koltuk ödeme adımına kadar hiç tutulmuyordu ve
+  // müşteri formu doldururken başkası alabiliyordu.
+  function addToCart() {
+    if (selected.length === 0) return;
+    if (!departure) {
+      setWarning("Sefer seçilmedi.");
+      return;
+    }
+    setWarning("");
+    startAdding(async () => {
+      const res = await addToCartAction({
+        tourId: tour.id,
+        departureId: departure.id,
+        seats: selected.map((s) => ({ code: s.code, gender: s.gender })),
+      });
+      if (!res.ok) {
+        setWarning(res.error);
+        // Koltuk az önce başkasına gitmiş olabilir: şemayı tazele.
+        router.refresh();
+        return;
+      }
+      goToCheckout();
+    });
+  }
 
   // Yan yana kuralı için etkin düzen: serbest plan varsa plandan, yoksa harfli düzenden.
   const layout = departure?.seatLayout ?? tour.seatLayout ?? "2+2";
@@ -283,13 +312,21 @@ export default function SeatMap({
           </div>
         </div>
         <button
-          disabled={selected.length === 0}
-          onClick={goToCheckout}
+          disabled={selected.length === 0 || adding}
+          onClick={addToCart}
           className="mt-5 w-full rounded-xl bg-accent py-3 text-sm font-bold text-white transition enabled:hover:bg-accent-dark disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Devam Et
+          {adding
+            ? "Sepete ekleniyor…"
+            : selected.length === 0
+            ? "Koltuk Seçin"
+            : `Sepete Ekle (${selected.length} koltuk)`}
         </button>
-        <p className="mt-2 text-center text-[11px] text-slate-400">Güvenli ödeme • iyzico</p>
+        <p className="mt-2 text-center text-[11px] text-slate-400">
+          {selected.length > 0
+            ? `Koltuklarınız ${HOLD_MINUTES} dakika sizin için tutulur.`
+            : "Güvenli ödeme • iyzico"}
+        </p>
       </aside>
 
       {/* Cinsiyet seçim penceresi */}

@@ -21,6 +21,7 @@ import {
   balanceOf,
   balanceDueDateFor,
   HOLD_MINUTES,
+  PAYMENT_GRACE_MINUTES,
   type AgeBand,
   type RoomPlan,
   type PaymentPlan,
@@ -114,6 +115,10 @@ export interface CreateBookingInput {
   // Ödemede girilen indirim kuponu kodu. Doğrulama ve tutardan düşme
   // SUNUCUDA yapılır (bkz. applyCouponTo); istemciden gelen tutara güvenilmez.
   couponCode?: string;
+  // Müşterinin sepet anahtarı (çerez). Verilirse koltuklar bu sepette
+  // KİLİTLİ olabilir ve satılabilir sayılır; verilmezse yalnız BOŞ koltuk
+  // satılır (elden satış bu yoldan geçiyor).
+  cartToken?: string;
 }
 
 // Fatura hangi yolcu adına kesilecek: yalnız 0 ile yolcu sayısı arasında
@@ -151,9 +156,23 @@ export type CreateResult =
     }
   | { ok: false; error: string };
 
-// Süresi dolan bekleyen rezervasyonları iptal edip koltuklarını serbest bırak.
+// Süresi dolan tutmaları serbest bırak — İKİ tür kilit var:
+//   1. SEPET kilidi: koltuk KILITLI, Seat.holdExpiresAt dolu, rezervasyon yok.
+//      Müşteri koltuğu sepete attı ama rezervasyona dönüştürmedi.
+//   2. REZERVASYON kilidi: koltuk KILITLI, Seat.holdExpiresAt NULL; süre
+//      Booking.holdExpiresAt'ta. Müşteri formu doldurdu ama ödemedi.
+//
+// Ayrımın tek işareti Seat.holdExpiresAt: dolu olan satır sepete, null olan
+// rezervasyona ait. Sepet süpürmesi yalnız dolu satırlara dokunur — aksi
+// halde ödeme bekleyen rezervasyonların koltukları da boşalırdı.
 export async function releaseExpiredHolds(): Promise<void> {
   const now = new Date();
+
+  // 1. Süresi dolmuş SEPET kilitleri.
+  await prisma.seat.updateMany({
+    where: { status: "KILITLI", holdExpiresAt: { lt: now } },
+    data: { status: "BOS", gender: null, holdToken: null, holdExpiresAt: null },
+  });
   const expired = await prisma.booking.findMany({
     where: { status: "BEKLIYOR", holdExpiresAt: { lt: now } },
     include: { passengers: true, tour: { select: { id: true } } },
@@ -360,6 +379,27 @@ export async function createPendingBooking(
   // İzin verilen koltuk durumları (elden satışta BLOKE koltuklar da satılabilir).
   const sellableStatuses = input.allowBlocked ? ["BOS", "BLOKE"] : ["BOS"];
 
+  // Sepetten gelen satışta koltuk zaten KİLİTLİ: müşteri onu "Sepete Ekle" ile
+  // tuttu. O kilit bu müşteriye aitse (holdToken eşleşiyor ve süresi
+  // dolmamışsa) koltuk satılabilir sayılır.
+  //
+  // Başkasının sepetindeki koltuk ASLA satılamaz: aşağıdaki kontroller
+  // holdToken'ı karşılaştırıyor, yani elle hazırlanmış bir istek başka
+  // müşterinin koltuğunu alamaz.
+  const cartToken = input.cartToken?.trim() || null;
+  const isMyCartSeat = (seat: {
+    status: string;
+    holdToken: string | null;
+    holdExpiresAt: Date | null;
+  }): boolean =>
+    Boolean(
+      cartToken &&
+        seat.status === "KILITLI" &&
+        seat.holdToken === cartToken &&
+        seat.holdExpiresAt &&
+        seat.holdExpiresAt > new Date()
+    );
+
   if (tour.bookingType === "KOLTUK") {
     const codes = input.seatCodes ?? [];
     if (codes.length === 0)
@@ -387,7 +427,9 @@ export async function createPendingBooking(
       });
       if (seats.length !== codes.length)
         return { ok: false as const, error: "Geçersiz koltuk seçimi." };
-      const notFree = seats.filter((s) => !sellableStatuses.includes(s.status));
+      const notFree = seats.filter(
+        (s) => !sellableStatuses.includes(s.status) && !isMyCartSeat(s)
+      );
       if (notFree.length > 0)
         return {
           ok: false as const,
@@ -479,16 +521,38 @@ export async function createPendingBooking(
         },
       });
 
-      // Koltukları kilitle + cinsiyet yaz (her koltuk kendi cinsiyetiyle)
+      // Koltukları kilitle + cinsiyet yaz (her koltuk kendi cinsiyetiyle).
+      //
+      // holdToken/holdExpiresAt TEMİZLENİR: kilit artık sepete değil
+      // rezervasyona ait, süresi Booking.holdExpiresAt'tan okunuyor. Bu
+      // temizlik olmadan sepet süpürmesi (releaseExpiredHolds) 15 dakika
+      // sonra ödeme bekleyen rezervasyonun koltuğunu boşaltırdı.
       for (const code of codes) {
         await tx.seat.updateMany({
           where: {
             tourId: tour.id,
             departureId: departure.id,
             code,
-            status: { in: sellableStatuses },
+            // Boş/bloke koltuk ya da BU müşterinin sepet kilidi.
+            OR: [
+              { status: { in: sellableStatuses } },
+              ...(cartToken
+                ? [
+                    {
+                      status: "KILITLI",
+                      holdToken: cartToken,
+                      holdExpiresAt: { gt: new Date() },
+                    },
+                  ]
+                : []),
+            ],
           },
-          data: { status: "KILITLI", gender: genderByCode[code] },
+          data: {
+            status: "KILITLI",
+            gender: genderByCode[code],
+            holdToken: null,
+            holdExpiresAt: null,
+          },
         });
       }
 
@@ -1142,6 +1206,31 @@ export async function deleteBookingRecord(
   ]);
 
   return { ok: true };
+}
+
+// iyzico'ya yönlendirilirken rezervasyonun tutma süresini uzat.
+//
+// Neden gerekli: tutma artık koltuk SEÇİMİNDE başlıyor, yani form doldurma +
+// 3D Secure aynı 15 dakikaya sığmak zorunda. Müşteri iyzico ekranındayken
+// süre dolarsa markBookingPaid ödemeyi reddediyordu — para çekilir, koltuk
+// giderdi. Yönlendirme anında pencere PAYMENT_GRACE_MINUTES kadar uzatılıyor.
+//
+// Süre yalnız İLERİ alınır: zaten daha uzun bir süresi olan rezervasyonun
+// penceresi kısaltılmaz.
+export async function extendHoldForPayment(bookingId: string): Promise<void> {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    select: { status: true, holdExpiresAt: true },
+  });
+  if (!booking || booking.status !== "BEKLIYOR") return;
+
+  const target = new Date(Date.now() + PAYMENT_GRACE_MINUTES * 60 * 1000);
+  if (booking.holdExpiresAt && booking.holdExpiresAt > target) return;
+
+  await prisma.booking.update({
+    where: { id: bookingId },
+    data: { holdExpiresAt: target },
+  });
 }
 
 // Sahipsiz dolu koltukları boşaltır — GEÇMİŞTE bozulmuş verinin onarımı.

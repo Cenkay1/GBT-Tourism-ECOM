@@ -912,7 +912,15 @@ export function priceBooking(input: {
 // de bu süreyi kullanıcıya yazıyor; booking.ts Prisma'ya bağlı olduğu için
 // istemciden import edilemez. Tek kaynak olması, ekranda yazan süre ile
 // gerçek kilit süresinin birbirinden kaymasını engeller.
-export const HOLD_MINUTES = 5;
+// Tutma artık ÖDEME adımında değil, koltuk SEPETE eklendiğinde başlıyor:
+// müşterinin form doldurma süresi de bu pencereye dahil, bu yüzden 5 değil 15
+// dakika. iyzico 3D Secure ekranında süre dolmasın diye ödemeye
+// yönlendirilirken ayrıca PAYMENT_GRACE_MINUTES kadar uzatılıyor.
+export const HOLD_MINUTES = 15;
+
+// iyzico'ya yönlendirilirken kilide eklenen ek süre. Müşteri 3D Secure
+// ekranındayken süre dolarsa para çekilip koltuk gidebilirdi.
+export const PAYMENT_GRACE_MINUTES = 10;
 
 export const DEFAULT_DEPOSIT_PERCENT = 25; // yeni turda önerilen ön ödeme oranı
 export const DEFAULT_BALANCE_DUE_DAYS = 5; // kalan ödeme: kalkıştan kaç gün önce
