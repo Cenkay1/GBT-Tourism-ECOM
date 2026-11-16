@@ -733,6 +733,132 @@ export async function sendHotelInquiryNotice(inquiryId: string): Promise<boolean
   );
 }
 
+// --- Yedek liste bildirimleri --------------------------------------------
+//
+// Yedek kayıt bir rezervasyon DEĞİL: e-postada "ödeme alınmadı" ve "yer
+// garantisi yok" açıkça yazıyor. Aksi halde müşteri rezervasyon yaptığını
+// sanıp otogara gelir.
+
+// Seferin okunur tarihi — yedek kayıt sefersiz turda da olabilir.
+async function waitlistDepartureText(
+  departureId: string | null,
+  fallback: Date
+): Promise<string> {
+  if (!departureId) return fmtDateTime(fallback);
+  const dep = await prisma.tourDeparture.findUnique({
+    where: { id: departureId },
+    select: { departureDate: true },
+  });
+  return fmtDateTime(dep?.departureDate ?? fallback);
+}
+
+export async function sendWaitlistReceived(id: string): Promise<boolean> {
+  const w = await prisma.waitlist.findUnique({
+    where: { id },
+    include: { tour: { select: { title: true, departureDate: true } } },
+  });
+  if (!w) return false;
+
+  const depText = await waitlistDepartureText(w.departureId, w.tour.departureDate);
+
+  const html = emailShell(
+    "Yedek listeye alındınız",
+    `<p style="font-size:14px;color:#475569">
+       Sayın ${escapeHtml(w.contactName)}, aşağıdaki sefer için yedek listeye alındınız.
+     </p>
+     <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Tur:</strong> ${escapeHtml(
+         w.tour.title
+       )}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kalkış:</strong> ${escapeHtml(
+         depText
+       )}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kişi sayısı:</strong> ${
+         w.quantity
+       }</p>
+     </div>
+     <div style="background:#fffbeb;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:14px;color:#92400e;margin:0">
+         <strong>Bu bir rezervasyon değildir.</strong> Şu an sizden herhangi bir ödeme
+         alınmadı ve koltuk ayrılmadı. Seferde yer açıldığında ya da yeterli talep
+         üzerine ek araç ayarlandığında sizi arayıp rezervasyonunuzu tamamlayacağız.
+       </p>
+     </div>
+     <p style="font-size:13px;color:#64748b">
+       Beklemekten vazgeçerseniz ya da bilgilerinizde değişiklik olursa bize
+       ${COMPANY_INFO.phones[0]} numarasından ulaşabilirsiniz.
+     </p>`
+  );
+
+  return sendEmail(
+    w.contactEmail,
+    `${COMPANY} — Yedek listeye alındınız (${w.tour.title})`,
+    html
+  );
+}
+
+export async function sendWaitlistAdminNotice(id: string): Promise<boolean> {
+  const w = await prisma.waitlist.findUnique({
+    where: { id },
+    include: { tour: { select: { title: true, departureDate: true } } },
+  });
+  if (!w) return false;
+
+  const depText = await waitlistDepartureText(w.departureId, w.tour.departureDate);
+  // 2. otobüs kararı bu sayıyla veriliyor: bu seferde toplam kaç kişi bekliyor.
+  const { waitlistCountFor } = await import("@/lib/waitlist");
+  const bekleyen = w.departureId ? await waitlistCountFor(w.departureId) : w.quantity;
+
+  const html = emailShell(
+    "Yedek listeye yeni kayıt",
+    `<p style="font-size:14px;color:#475569">Dolu bir sefer için yedek liste kaydı geldi.</p>
+     <div style="background:#f8fafc;border-radius:10px;padding:16px;margin:16px 0">
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Tur:</strong> ${escapeHtml(
+         w.tour.title
+       )}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kalkış:</strong> ${escapeHtml(
+         depText
+       )}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Ad Soyad:</strong> ${escapeHtml(
+         w.contactName
+       )}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Telefon:</strong>
+         <a href="tel:${escapeHtml(w.contactPhone)}" style="color:#6a1f34">${escapeHtml(
+           w.contactPhone
+         )}</a></p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>E-posta:</strong> ${escapeHtml(
+         w.contactEmail
+       )}</p>
+       <p style="font-size:15px;color:#1a2550;margin:4px 0"><strong>Kişi sayısı:</strong> ${
+         w.quantity
+       }</p>
+       ${
+         w.note
+           ? `<p style="font-size:14px;color:#475569;margin:10px 0 0;white-space:pre-wrap"><strong>Not:</strong> ${escapeHtml(
+               w.note
+             )}</p>`
+           : ""
+       }
+     </div>
+     <p style="font-size:14px;color:#1a2550">
+       Bu seferde yedek listede toplam <strong>${bekleyen} kişi</strong> bekliyor.
+     </p>
+     <p style="margin-top:16px">
+       <a href="${siteBaseUrl()}/admin/yedek-liste"
+          style="display:inline-block;background:#22306a;color:#fff;text-decoration:none;
+                 padding:12px 22px;border-radius:10px;font-weight:700;font-size:14px">
+         Yedek Listeyi Aç
+       </a>
+     </p>`
+  );
+
+  return sendEmail(
+    adminNotifyEmail(),
+    `Yedek liste — ${w.tour.title} · ${w.contactName} (${w.quantity} kişi)`,
+    html
+  );
+}
+
 // --- Ödeme durumu bildirimi (ön ödeme / kısmi tahsilat) -------------------
 //
 // "Şu kadar ödendi, şu kadar kaldı, şu tarihe kadar ödenmeli" bildirimi.

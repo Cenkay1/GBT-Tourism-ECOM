@@ -25,6 +25,8 @@ import {
   needsIdDocument,
   HOLD_MINUTES,
   depositFor,
+  depositAvailableFor,
+  DEPOSIT_CUTOFF_DAYS,
   balanceDueDateFor,
   formatDate,
   type PaymentPlan,
@@ -211,9 +213,12 @@ export default function CheckoutForm({
     singleSupplement,
   });
 
-  // Ödeme planı: peşin mi, ön ödeme (kapora) ile rezerve mi. Yalnız turda ön
-  // ödeme açıksa seçilebilir; sunucu da aynı kuralı doğrular.
-  const depositEnabled = depositPercent > 0;
+  // Ödeme planı: peşin mi, ön ödeme (kapora) ile rezerve mi. İKİ koşul birlikte
+  // gerekir — turda ön ödeme açık olmalı VE kalkışa DEPOSIT_CUTOFF_DAYS günden
+  // fazla kalmalı. Sunucu da aynı kuralı doğrular (lib/booking.ts).
+  const depositOffered = depositPercent > 0;
+  const depositInTime = depositAvailableFor(departureDate);
+  const depositEnabled = depositOffered && depositInTime;
   const [plan, setPlan] = useState<PaymentPlan>("FULL");
   const effectivePlan: PaymentPlan = depositEnabled ? plan : "FULL";
   const depositAmount = depositEnabled ? depositFor(priced.total, depositPercent) : 0;
@@ -676,6 +681,19 @@ export default function CheckoutForm({
           <span>Toplam</span>
           <span className="text-accent">{formatPrice(priced.total, currency)}</span>
         </div>
+
+        {/* Turda ön ödeme açık ama kalkış yakın: seçenek yerine gerekçe yazılır.
+            Sessizce gizlenseydi müşteri kapora beklerken peşin tutarla
+            karşılaşır ve nedenini anlamazdı. */}
+        {depositOffered && !depositInTime && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <p className="text-sm font-bold text-brand">Ödeme Seçeneği</p>
+            <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Kalkışa {DEPOSIT_CUTOFF_DAYS} günden az kaldığı için ön ödeme (kapora)
+              ile rezervasyon kapalıdır. Rezervasyon peşin olarak tamamlanır.
+            </p>
+          </div>
+        )}
 
         {/* Ödeme planı — ön ödeme açık turlarda müşteri seçer */}
         {depositEnabled && (

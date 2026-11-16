@@ -14,6 +14,7 @@ import {
   sellableDepartures,
 } from "@/lib/tours";
 import { MapPinIcon, BusIcon } from "@/components/Icons";
+import { waitlistCountsFor } from "@/lib/waitlist";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,8 @@ export default async function TourDetail({
   const activeDepartures = sellableDepartures(tour);
   const visitPlaces = (tour.places ?? []).filter((p) => p.type === "GEZI");
   const boardingPlaces = (tour.places ?? []).filter((p) => p.type === "BINIS");
+  // Dolu seferde yedek liste formu çıkıyor; müşteri sıranın uzunluğunu görsün.
+  const waitingByDeparture = await waitlistCountsFor(activeDepartures.map((d) => d.id));
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 pb-28 md:pb-6">
@@ -349,6 +352,7 @@ export default async function TourDetail({
 
           <BookingLauncher
             tour={tour}
+            waitingByDeparture={waitingByDeparture}
             className="mt-5 w-full rounded-xl bg-accent py-3 text-center text-sm font-bold text-white transition hover:bg-accent-dark"
           />
           <p className="mt-2 text-center text-[11px] text-white/60">Güvenli ödeme • iyzico</p>
@@ -368,7 +372,7 @@ export default async function TourDetail({
       </div>
 
       {/* Mobilde ekranın altına yapışan satın alma şeridi (masaüstünde gizli). */}
-      <MobileBookingBar tour={tour} />
+      <MobileBookingBar tour={tour} waitingByDeparture={waitingByDeparture} />
     </div>
   );
 }

@@ -26,6 +26,10 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
 
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return null;
+  // Pasife alınan üyenin AÇIK oturumu da düşer: oturum JWT olduğu için çerez
+  // hâlâ geçerli, yetkiyi her istekte buradan okuyoruz. null dönünce
+  // requireUser girişe yönlendirir.
+  if (!user.active) return null;
 
   return {
     id: user.id,

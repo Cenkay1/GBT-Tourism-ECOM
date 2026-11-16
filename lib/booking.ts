@@ -17,6 +17,7 @@ import {
   assignRooms,
   validateRooms,
   depositFor,
+  depositAvailableFor,
   balanceOf,
   balanceDueDateFor,
   HOLD_MINUTES,
@@ -274,10 +275,14 @@ export async function createPendingBooking(
 
   const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
 
-  // Ön ödeme (kapora) planı: yalnız turda oran tanımlıysa geçerli. Geçerliyse
-  // kalan ödemenin son tarihi ve müşterinin kalanı ödeyeceği gizli bağlantı
-  // anahtarı şimdi oluşturulur (onay e-postasına girecek).
-  const depositEnabled = tour.depositPercent > 0;
+  // Ön ödeme (kapora) planı: turda oran tanımlı OLMALI ve kalkışa
+  // DEPOSIT_CUTOFF_DAYS günden fazla kalmalı. İkinci koşul sunucuda da
+  // aranıyor: istemci kandırılıp paymentPlan:"DEPOSIT" gönderilse bile
+  // rezervasyon peşine düşer, kalan ödemenin son tarihi geçmişte kalan bir
+  // bakiye oluşmaz. Geçerliyse kalan ödemenin son tarihi ve müşterinin kalanı
+  // ödeyeceği gizli bağlantı anahtarı şimdi oluşturulur (onay e-postasına girecek).
+  const depositEnabled =
+    tour.depositPercent > 0 && depositAvailableFor(departure.departureDate);
   const useDeposit = input.paymentPlan === "DEPOSIT" && depositEnabled;
   const balanceDueAt = useDeposit
     ? balanceDueDateFor(departure.departureDate, tour.balanceDueDays)

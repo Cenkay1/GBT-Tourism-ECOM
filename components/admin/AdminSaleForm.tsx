@@ -34,9 +34,13 @@ const emptyRow = (seatCode?: string): PassRow => ({
 export default function AdminSaleForm({
   tour,
   action,
+  prefill,
 }: {
   tour: Tour;
   action: (fd: FormData) => void;
+  // Yedek listeden gelen satışta müşterinin bilgileri önden dolu gelir —
+  // görevli telefonda aldığı bilgiyi ikinci kez yazmasın.
+  prefill?: { contactName?: string; contactPhone?: string; contactEmail?: string };
 }) {
   const isKoltuk = tour.bookingType === "KOLTUK";
 
@@ -253,15 +257,31 @@ export default function AdminSaleForm({
         <div className="grid gap-4 sm:grid-cols-3">
           <label className={label}>
             Ad Soyad *
-            <input name="contactName" required className={input} />
+            <input
+              name="contactName"
+              required
+              defaultValue={prefill?.contactName}
+              className={input}
+            />
           </label>
           <label className={label}>
             Telefon *
-            <input name="contactPhone" required className={input} placeholder="5xx xxx xx xx" />
+            <input
+              name="contactPhone"
+              required
+              defaultValue={prefill?.contactPhone}
+              className={input}
+              placeholder="5xx xxx xx xx"
+            />
           </label>
           <label className={label}>
             E-posta
-            <input name="contactEmail" type="email" className={input} />
+            <input
+              name="contactEmail"
+              type="email"
+              defaultValue={prefill?.contactEmail}
+              className={input}
+            />
           </label>
         </div>
       </div>

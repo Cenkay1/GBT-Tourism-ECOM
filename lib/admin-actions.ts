@@ -33,6 +33,18 @@ import {
   isCollectionMethod,
   ensureBalanceToken,
 } from "@/lib/collections";
+import {
+  createMember,
+  setMemberActive,
+  deleteMember,
+  countGuestBookingsFor,
+} from "@/lib/members";
+import {
+  markWaitlistConverted,
+  moveWaitlistEntry,
+  cancelWaitlistEntry,
+  updateWaitlistNote,
+} from "@/lib/waitlist";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
 import { startPayment } from "@/lib/payment";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
@@ -1247,6 +1259,121 @@ export async function createBalanceLinkAction(
 }
 
 // ---- TATİL & OTEL TALEPLERİ ----
+
+// --- Üye yönetimi ---------------------------------------------------------
+//
+// İş mantığı lib/members.ts'te; burada yalnız yetki kontrolü, form okuma ve
+// önbellek tazeleme var.
+
+export async function createMemberAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const email = String(fd.get("email") ?? "");
+  const res = await createMember({
+    name: String(fd.get("name") ?? ""),
+    email,
+    phone: String(fd.get("phone") ?? ""),
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidatePath("/admin/uyeler");
+  return {
+    ok: true,
+    message:
+      "Üye oluşturuldu. Şifre belirlenmedi — üye giriş ekranındaki \"Şifremi unuttum\" ile kendi şifresini kurabilir.",
+  };
+}
+
+// Üye eklemeden önce uyarı için: bu e-postayla kaç misafir rezervasyonu var.
+// Kaydedilince bunlar hesaba bağlanacak (bkz. lib/members.ts).
+export async function guestBookingCountAction(email: string): Promise<number> {
+  await requireAdmin();
+  return countGuestBookingsFor(email);
+}
+
+export async function setMemberActiveAction(id: string, active: boolean) {
+  await requireAdmin();
+  const res = await setMemberActive(id, active);
+  if (!res.ok) throw new Error(res.error);
+  revalidatePath("/admin/uyeler");
+  revalidatePath(`/admin/uyeler/${id}`);
+}
+
+export async function deleteMemberAction(id: string) {
+  await requireAdmin();
+  const res = await deleteMember(id);
+  if (!res.ok) throw new Error(res.error);
+  revalidatePath("/admin/uyeler");
+  redirect("/admin/uyeler");
+}
+
+// --- Yedek liste ----------------------------------------------------------
+//
+// İş mantığı lib/waitlist.ts'te. Dönüşüm iki adımlı: görevli önce rezervasyonu
+// mevcut elden satış akışıyla açar, SONRA yedek kaydı o rezervasyona bağlar.
+// Tek adımda yapılmıyor çünkü rezervasyon açarken koltuk, yaş, oda ve tahsilat
+// kararları veriliyor — yedek kayıt bunların hiçbirini taşımıyor.
+
+function revalidateWaitlist() {
+  revalidatePath("/admin/yedek-liste");
+  revalidatePath("/turlar", "layout");
+}
+
+export async function convertWaitlistAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const id = str(fd, "id");
+  const bookingId = str(fd, "bookingId");
+  if (!id || !bookingId)
+    return { ok: false, error: "Yedek kayıt ve rezervasyon belirtilmeli." };
+  const res = await markWaitlistConverted(id, bookingId);
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidateWaitlist();
+  return { ok: true, message: "Yedek kayıt rezervasyona bağlandı." };
+}
+
+export async function moveWaitlistAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const id = str(fd, "id");
+  const departureId = str(fd, "departureId");
+  if (!id || !departureId) return { ok: false, error: "Hedef sefer seçilmeli." };
+  const res = await moveWaitlistEntry(id, departureId);
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidateWaitlist();
+  return { ok: true, message: "Kayıt yeni sefere taşındı." };
+}
+
+export async function cancelWaitlistAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const id = str(fd, "id");
+  if (!id) return { ok: false, error: "Yedek kayıt belirtilmedi." };
+  const res = await cancelWaitlistEntry(id, str(fd, "note"));
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidateWaitlist();
+  return { ok: true, message: "Kayıt iptal edildi." };
+}
+
+export async function updateWaitlistNoteAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const id = str(fd, "id");
+  if (!id) return { ok: false, error: "Yedek kayıt belirtilmedi." };
+  const res = await updateWaitlistNote(id, str(fd, "note"));
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidateWaitlist();
+  return { ok: true, message: "Not kaydedildi." };
+}
 
 export async function setInquiryStatus(id: string, status: string) {
   await requireAdmin();

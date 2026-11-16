@@ -115,6 +115,44 @@ export function departureSeatsLeft(tour: Tour, dep: TourDeparture): number {
   return Math.max(0, cap - (dep.sold ?? 0));
 }
 
+// Sefer satışa kapanacak kadar dolu mu? Yedek liste formu YALNIZ bu durumda
+// gösterilir, o yüzden ölçüt tek yerde duruyor: istemci (tur sayfası) ve
+// sunucu (lib/waitlist.ts) aynı cevabı vermeli — aksi halde müşteri "tükendi"
+// görürken yedek liste "yer var" diyebilirdi.
+//
+// KOLTUK: satılı/kilitli ya da bloke olmayan tek koltuk kalmamışsa dolu.
+// KONTENJAN: kalan yer sıfır.
+export function departureIsFull(tour: Tour, dep?: TourDeparture): boolean {
+  if (tour.bookingType === "KONTENJAN") {
+    if (!dep) return (tour.capacity ?? 0) - (tour.sold ?? 0) <= 0;
+    return departureSeatsLeft(tour, dep) <= 0;
+  }
+  const rows = buildSeatGrid(tour, dep ? seatStateFrom(dep) : undefined);
+  if (rows.length === 0) return false;
+  for (const row of rows) {
+    for (const seat of row) {
+      if (seat.code === "aisle") continue;
+      if (seat.status === "BOS") return false;
+    }
+  }
+  return true;
+}
+
+// buildSeatGrid'in beklediği sefer durumu. (lib/tours.ts'teki seatStateOf ile
+// aynı işi yapıyor ama o modül Prisma'ya bağlı, istemci import edemez.)
+function seatStateFrom(dep: TourDeparture): SeatState {
+  return {
+    soldSeats: dep.soldSeats ?? [],
+    blockedSeats: dep.blockedSeats ?? [],
+    seatGenders: dep.seatGenders ?? {},
+    vehicleType: dep.vehicleType,
+    seatRows: dep.seatRows,
+    doorAfterRow: dep.doorAfterRow,
+    backRowFull: dep.backRowFull,
+    seatMap: dep.seatMap,
+  };
+}
+
 // Tura eklenebilecek özellik/hizmet (Konaklama, Kahvaltı, Rehber…).
 export interface Amenity {
   id: string;
@@ -411,6 +449,59 @@ export function seatNeighbors(
   const n = seatNeighbor(code, src.layout ?? "2+2");
   return n ? [n] : [];
 }
+
+// Bir koltuğa hangi cinsiyetin oturabileceği. seatNeighbors ile bulunan BİTİŞİK
+// koltuklardaki YABANCI yolcuların cinsiyetine bakılır: yanında kadın oturan bir
+// koltuğa erkek, yanında erkek oturan bir koltuğa kadın oturamaz.
+//
+// Neden "hangi cinsiyet mümkün" diye soruyoruz: müşteri koltuğa basmadan önce
+// kısıtlamayı görmeli. Seçimden SONRA reddetmek koltuğu boş gösterip müşteriyi
+// tekrar denemeye itiyordu.
+//
+// exclude: kuralı bağlamayacak komşular — müşterinin KENDİ sepetindeki/seçtiği
+// koltuklar. Aynı rezervasyonda seyahat edenler yan yana karışık oturabilir.
+export interface SeatGenderRule {
+  E: boolean;
+  K: boolean;
+  // Hangi komşu koltuk hangi cinsiyeti engelliyor (mesaj bundan kurulur).
+  blockedBy: { E: string[]; K: string[] };
+}
+
+export function allowedGendersFor(
+  code: string,
+  src: { seatMap?: SeatMapRows | null; layout?: string | null },
+  takenGenders: Record<string, Gender>,
+  exclude?: Set<string>
+): SeatGenderRule {
+  const blockedBy: { E: string[]; K: string[] } = { E: [], K: [] };
+  for (const neighbor of seatNeighbors(code, src)) {
+    if (exclude?.has(neighbor)) continue;
+    const g = takenGenders[neighbor];
+    if (g !== "E" && g !== "K") continue;
+    // Komşuda kadın varsa ERKEK engellenir, erkek varsa KADIN engellenir.
+    if (g === "K") blockedBy.E.push(neighbor);
+    else blockedBy.K.push(neighbor);
+  }
+  return {
+    E: blockedBy.E.length === 0,
+    K: blockedBy.K.length === 0,
+    blockedBy,
+  };
+}
+
+// Engelin müşteriye gösterilecek gerekçesi. İstemci (koltuk şeması) ve sunucu
+// (sepete ekleme, devir) aynı metni üretsin diye tek yerde duruyor.
+export function genderBlockMessage(
+  code: string,
+  gender: Gender,
+  rule: SeatGenderRule
+): string | null {
+  const blockers = rule.blockedBy[gender];
+  if (blockers.length === 0) return null;
+  const neighborGender: Gender = gender === "E" ? "K" : "E";
+  return `${blockers.join(", ")} koltuğunda ${genderLabel(neighborGender)} bir yolcu var. Yan yana farklı cinsiyet oturamayacağı için ${code} koltuğunu ${genderLabel(gender)} olarak seçemezsiniz.`;
+}
+
 
 function seatCell(
   code: string,
@@ -826,6 +917,30 @@ export const HOLD_MINUTES = 5;
 export const DEFAULT_DEPOSIT_PERCENT = 25; // yeni turda önerilen ön ödeme oranı
 export const DEFAULT_BALANCE_DUE_DAYS = 5; // kalan ödeme: kalkıştan kaç gün önce
 export const BALANCE_REMINDER_DAYS = 6; // son tarihten 1 gün önce hatırlat
+
+// Ön ödemenin (kapora) kapandığı sınır: kalkışa bu kadar GÜNDEN AZ kaldıysa
+// müşteri yalnız peşin ödeyebilir.
+//
+// Neden: kapora alınırsa kalan ödemenin son tarihi Tour.balanceDueDays ile
+// kalkıştan N gün öncesine düşüyor. Kalkışa 5 günden az kalmışken kapora
+// alınırsa o son tarih GEÇMİŞTE kalır — yani tahsil edilemeyen bakiyeyle
+// otobüse binilir. Sınır turlara göre değişmiyor, tek sabit.
+export const DEPOSIT_CUTOFF_DAYS = 5;
+
+// Bu sefer için ön ödeme seçeneği açık mı? Sınır SEFERİN kalkış tarihinden
+// hesaplanır (turun değil) — bir tur birden çok sefer taşıyor.
+//
+// Geçersiz tarihte false döner: ödeme planı belirsizse güvenli taraf peşindir.
+export function depositAvailableFor(
+  departureDate: string | Date,
+  now: Date = new Date()
+): boolean {
+  const dep =
+    departureDate instanceof Date ? departureDate : parseDepartureDate(departureDate);
+  if (Number.isNaN(dep.getTime())) return false;
+  const msLeft = dep.getTime() - now.getTime();
+  return msLeft > DEPOSIT_CUTOFF_DAYS * 24 * 60 * 60 * 1000;
+}
 
 // Müşterinin satın alırken seçtiği ödeme planı.
 export type PaymentPlan = "FULL" | "DEPOSIT";

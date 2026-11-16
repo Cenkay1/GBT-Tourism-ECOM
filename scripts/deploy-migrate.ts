@@ -306,6 +306,42 @@ async function main() {
     console.log("  = SavedPassenger tablosu zaten var");
   }
 
+  // Waitlist — dolu seferler için koltuksuz yedek talepler.
+  if (!(await tableExists("Waitlist"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "Waitlist" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "tourId" TEXT NOT NULL,
+        "departureId" TEXT,
+        "contactName" TEXT NOT NULL,
+        "contactPhone" TEXT NOT NULL,
+        "contactEmail" TEXT NOT NULL,
+        "quantity" INTEGER NOT NULL DEFAULT 1,
+        "note" TEXT NOT NULL DEFAULT '',
+        "userId" TEXT,
+        "status" TEXT NOT NULL DEFAULT 'BEKLIYOR',
+        "bookingId" TEXT,
+        "handledAt" DATETIME,
+        "handledNote" TEXT NOT NULL DEFAULT '',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Waitlist_tourId_fkey" FOREIGN KEY ("tourId")
+          REFERENCES "Tour" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Waitlist_departureId_fkey" FOREIGN KEY ("departureId")
+          REFERENCES "TourDeparture" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+        CONSTRAINT "Waitlist_userId_fkey" FOREIGN KEY ("userId")
+          REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX "Waitlist_departureId_status_idx" ON "Waitlist"("departureId", "status")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX "Waitlist_tourId_idx" ON "Waitlist"("tourId")`
+    );
+    console.log("  + Waitlist tablosu");
+  } else {
+    console.log("  = Waitlist tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {
@@ -377,6 +413,9 @@ async function main() {
   await add("Passenger", "roomIndex", `"roomIndex" INTEGER`);
   await add("Passenger", "idDocument", `"idDocument" TEXT`);
   await add("Passenger", "ageVerified", `"ageVerified" BOOLEAN NOT NULL DEFAULT false`);
+
+  // User — üyelik aktif mi (admin "pasife al"). Mevcut üyeler aktif sayılır.
+  await add("User", "active", `"active" BOOLEAN NOT NULL DEFAULT true`);
 
   if (added === 0) console.log("  = eksik kolon yok");
 

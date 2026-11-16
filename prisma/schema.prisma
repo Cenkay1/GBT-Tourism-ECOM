@@ -78,6 +78,7 @@ model Tour {
   bookings   Booking[]
   places     TourPlace[]
   departures TourDeparture[]
+  waitlist   Waitlist[]
 }
 
 // Bir turun ayrı seferi (kalkış/dönüş çifti). Koltuklar ve rezervasyonlar
@@ -98,6 +99,7 @@ model TourDeparture {
 
   seats    Seat[]
   bookings Booking[]
+  waitlist Waitlist[]
 
   @@index([tourId, departureDate])
 }
@@ -268,6 +270,10 @@ model User {
   points         Int       @default(0) // güncel puan bakiyesi
   lifetimePoints Int       @default(0) // ömür boyu kazanım (kademe hesabı)
   tier           String    @default("BRONZE") // BRONZE | SILVER | GOLD | PLATINUM
+  // Üyelik aktif mi. Admin "pasife al" dediğinde false olur: üye giriş yapamaz
+  // ve açık oturumu da düşer (bkz. lib/session.ts), ama rezervasyon geçmişi,
+  // puanı ve faturaları OLDUĞU GİBİ kalır. Kalıcı silme ayrı bir işlemdir.
+  active         Boolean   @default(true)
   createdAt      DateTime  @default(now())
 
   accounts        Account[]
@@ -275,6 +281,44 @@ model User {
   bookings        Booking[]
   pointsLog       PointsLedger[]
   savedPassengers SavedPassenger[]
+  waitlist        Waitlist[]
+}
+
+// Yedek liste kaydı — otobüs/kontenjan DOLUYKEN alınan koltuksuz talep.
+//
+// Neden Booking üzerinde bir durum değil de ayrı tablo: bu bir rezervasyon
+// DEĞİLDİR. Koltuk ayrılmaz, para alınmaz, kontenjan/ciro/koltuk tahtası
+// sayımlarına girmez. Booking'e "YEDEK" gibi bir durum eklenseydi status
+// filtreleyen her yerin (ciro, kontenjan, hatırlatmalar, Excel çıktısı, fatura)
+// onu dışlamayı öğrenmesi gerekirdi.
+//
+// Amaç: dolu seferde talep kaybedilmesin. Yeterli talep birikirse 2. otobüs
+// temin edilir; ya da 1. otobüsten bir iptal çıkınca bekleyen oraya
+// yerleştirilir; ya da bekleyen farklı bir sefere taşınır. Yerleştirme kararı
+// ACENTENİN — otomatik bildirim ya da otomatik yerleştirme YOK.
+model Waitlist {
+  id          String         @id @default(cuid())
+  tourId      String
+  tour        Tour           @relation(fields: [tourId], references: [id], onDelete: Cascade)
+  departureId String? // hangi sefer için bekliyor (sefersiz turda null)
+  departure   TourDeparture? @relation(fields: [departureId], references: [id], onDelete: Cascade)
+
+  contactName  String
+  contactPhone String
+  contactEmail String
+  quantity     Int    @default(1) // kaç kişi için bekliyor
+  note         String @default("") // müşterinin notu
+  userId       String? // giriş yapmış müşteriyse hesabı
+  user         User?   @relation(fields: [userId], references: [id])
+
+  status      String    @default("BEKLIYOR") // BEKLIYOR | DONUSTURULDU | IPTAL
+  bookingId   String? // DONUSTURULDU ise oluşan rezervasyon
+  handledAt   DateTime? // işleme alındığı an (dönüşüm ya da iptal)
+  handledNote String    @default("") // görevli notu
+  createdAt   DateTime  @default(now())
+
+  @@index([departureId, status])
+  @@index([tourId])
 }
 
 // Müşterinin hesabına kaydettiği yolcu bilgisi (kendisi ve yakınları).

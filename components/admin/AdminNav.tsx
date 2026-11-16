@@ -21,6 +21,7 @@ const items = [
   { href: "/admin/afisler", label: "Afişler", Icon: ImageIcon },
   { href: "/admin/rezervasyonlar", label: "Rezervasyonlar", Icon: TicketIcon },
   { href: "/admin/talepler", label: "Talepler", Icon: HeadsetIcon },
+  { href: "/admin/yedek-liste", label: "Yedek Liste", Icon: UsersIcon },
   { href: "/admin/uyeler", label: "Üyeler", Icon: UserIcon },
   { href: "/admin/yorumlar", label: "Yorumlar", Icon: UsersIcon },
 ];

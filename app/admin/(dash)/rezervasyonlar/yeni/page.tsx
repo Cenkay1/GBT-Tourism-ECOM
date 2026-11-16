@@ -9,9 +9,21 @@ export const dynamic = "force-dynamic";
 export default async function NewManualSale({
   searchParams,
 }: {
-  searchParams: Promise<{ tur?: string; hata?: string }>;
+  searchParams: Promise<{
+    tur?: string;
+    hata?: string;
+    ad?: string;
+    telefon?: string;
+    eposta?: string;
+    yedek?: string;
+  }>;
 }) {
-  const { tur, hata } = await searchParams;
+  const { tur, hata, ad, telefon, eposta, yedek } = await searchParams;
+  // Yedek listeden gelindiyse müşteri bilgileri önden dolu gelir.
+  const prefill =
+    ad || telefon || eposta
+      ? { contactName: ad, contactPhone: telefon, contactEmail: eposta }
+      : undefined;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -30,7 +42,15 @@ export default async function NewManualSale({
         </div>
       )}
 
-      {!tur ? <TourPicker /> : <SaleFormLoader id={tur} />}
+      {yedek && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Bu satış <strong>yedek listeden</strong> açılıyor. Satışı tamamladıktan sonra
+          Yedek Liste ekranında kaydı bu rezervasyona bağlamayı unutmayın — aksi halde
+          kişi listede bekliyor görünmeye devam eder.
+        </div>
+      )}
+
+      {!tur ? <TourPicker /> : <SaleFormLoader id={tur} prefill={prefill} />}
     </div>
   );
 }
@@ -62,7 +82,13 @@ async function TourPicker() {
   );
 }
 
-async function SaleFormLoader({ id }: { id: string }) {
+async function SaleFormLoader({
+  id,
+  prefill,
+}: {
+  id: string;
+  prefill?: { contactName?: string; contactPhone?: string; contactEmail?: string };
+}) {
   const tour = await getTourById(id);
   if (!tour) notFound();
   return (
@@ -80,7 +106,7 @@ async function SaleFormLoader({ id }: { id: string }) {
           Turu değiştir
         </Link>
       </div>
-      <AdminSaleForm tour={tour} action={createManualBooking} />
+      <AdminSaleForm tour={tour} action={createManualBooking} prefill={prefill} />
     </>
   );
 }

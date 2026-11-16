@@ -4,6 +4,9 @@ import { prisma } from "@/lib/db";
 import { formatPrice, formatDate } from "@/lib/tours";
 import { tierDef, tierInfo } from "@/lib/loyalty";
 import { ChevronRightIcon, CheckCircleIcon } from "@/components/Icons";
+import MemberActiveToggle from "@/components/admin/MemberActiveToggle";
+import MemberDangerZone from "@/components/admin/MemberDangerZone";
+import { memberDeletionImpact } from "@/lib/members";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +57,8 @@ export default async function AdminMemberDetail({
   const tier = tierDef(user.tier);
   const { next, toNext } = tierInfo(user.lifetimePoints);
   const hasGoogle = user.accounts.some((a) => a.provider === "google");
+  // Silme onay ekranı sonuçları sayılarla yazsın diye.
+  const impact = (await memberDeletionImpact(user.id))!;
 
   return (
     <div>
@@ -64,6 +69,22 @@ export default async function AdminMemberDetail({
         <ChevronRightIcon width={14} height={14} />
         <span className="text-slate-700">{user.name ?? user.email}</span>
       </nav>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-3 shadow-sm">
+        <span className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500">Üyelik durumu</span>
+          <span
+            className={`rounded-full px-2 py-1 text-xs font-semibold ${
+              user.active
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-slate-200 text-slate-600"
+            }`}
+          >
+            {user.active ? "Aktif" : "Pasif — giriş yapamaz"}
+          </span>
+        </span>
+        <MemberActiveToggle id={user.id} active={user.active} />
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         {/* Sol: rezervasyonlar + puan hareketleri */}
@@ -223,6 +244,13 @@ export default async function AdminMemberDetail({
                 : "En üst kademede."}
             </p>
           </section>
+
+          <MemberDangerZone
+            id={user.id}
+            email={user.email}
+            active={user.active}
+            impact={impact}
+          />
         </aside>
       </div>
     </div>

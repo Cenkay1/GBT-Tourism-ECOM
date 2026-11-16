@@ -3,6 +3,8 @@ import { prisma } from "@/lib/db";
 import { formatDate } from "@/lib/tours";
 import { tierDef } from "@/lib/loyalty";
 import { UserIcon, CheckCircleIcon, StarIcon } from "@/components/Icons";
+import MemberForm from "@/components/admin/MemberForm";
+import MemberActiveToggle from "@/components/admin/MemberActiveToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -28,18 +30,25 @@ export default async function AdminMembers() {
   const googleCount = users.filter((u) =>
     u.accounts.some((a) => a.provider === "google")
   ).length;
+  const passive = users.filter((u) => !u.active).length;
 
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-bold text-brand">Üyeler</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Kayıtlı müşteri hesapları, sadakat puanları ve kademeleri.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-brand">Üyeler</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Kayıtlı müşteri hesapları, sadakat puanları ve kademeleri.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <MemberForm />
       </div>
 
       {/* Özet */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-3">
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Toplam Üye" value={total} icon={<UserIcon width={22} height={22} />} />
         <Stat
           label="E-postası Doğrulanmış"
@@ -51,6 +60,11 @@ export default async function AdminMembers() {
           value={googleCount}
           icon={<StarIcon width={22} height={22} />}
         />
+        <Stat
+          label="Pasif Üye"
+          value={passive}
+          icon={<UserIcon width={22} height={22} />}
+        />
       </div>
 
       <div className="mt-6 overflow-hidden rounded-2xl bg-white shadow-sm">
@@ -61,17 +75,18 @@ export default async function AdminMembers() {
                 <th className="px-4 py-3">Üye</th>
                 <th className="px-4 py-3">İletişim</th>
                 <th className="px-4 py-3">Yöntem</th>
+                <th className="px-4 py-3">Durum</th>
                 <th className="px-4 py-3">Kademe</th>
                 <th className="px-4 py-3">Puan</th>
                 <th className="px-4 py-3">Rezervasyon</th>
                 <th className="px-4 py-3">Kayıt</th>
-                <th className="px-4 py-3 text-right">Detay</th>
+                <th className="px-4 py-3 text-right">İşlem</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {users.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-10 text-center text-slate-400">
                     Henüz üye kaydı yok. Müşteriler siteden kayıt olduğunda burada listelenir.
                   </td>
                 </tr>
@@ -114,6 +129,17 @@ export default async function AdminMembers() {
                       <td className="px-4 py-3">
                         <span
                           className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                            u.active
+                              ? "bg-emerald-50 text-emerald-700"
+                              : "bg-slate-200 text-slate-600"
+                          }`}
+                        >
+                          {u.active ? "Aktif" : "Pasif"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`rounded-full px-2 py-1 text-xs font-semibold ${
                             tierBadge[u.tier] ?? tierBadge.BRONZE
                           }`}
                         >
@@ -134,6 +160,7 @@ export default async function AdminMembers() {
                         {formatDate(u.createdAt.toISOString())}
                       </td>
                       <td className="px-4 py-3 text-right">
+                        <MemberActiveToggle id={u.id} active={u.active} />
                         <Link
                           href={`/admin/uyeler/${u.id}`}
                           className="rounded-md px-3 py-1.5 text-xs font-semibold text-brand hover:bg-slate-100"

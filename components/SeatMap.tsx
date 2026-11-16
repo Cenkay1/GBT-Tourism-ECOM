@@ -6,10 +6,12 @@ import {
   Tour,
   TourDeparture,
   Gender,
+  SeatGenderRule,
   buildSeatGrid,
   formatPrice,
   vehicleLabel,
-  seatNeighbors,
+  allowedGendersFor,
+  genderBlockMessage,
   genderLabel,
 } from "@/lib/shared";
 import { BusIcon } from "@/components/Icons";
@@ -83,24 +85,32 @@ export default function SeatMap({
       setWarning(`En fazla ${MAX_SEATS} koltuk seçebilirsiniz.`);
       return;
     }
+    const rule = ruleFor(code);
+    if (!rule.E && !rule.K) {
+      setWarning(
+        `${code} koltuğunun iki yanında farklı cinsiyette yolcular var; bu koltuk seçilemiyor.`
+      );
+      return;
+    }
     setPicking(code);
   }
 
-  // Yan yana kuralı: seçilen cinsiyet, bitişik DOLU koltuktaki yabancı yolcunun
-  // cinsiyetiyle çelişmemeli. (Aynı rezervasyonda seçilenler serbest.)
-  function conflictReason(code: string, gender: Gender): string | null {
-    for (const neighbor of seatNeighbors(code, { seatMap, layout })) {
-      const neighborTakenGender = takenGenders[neighbor];
-      if (neighborTakenGender && neighborTakenGender !== gender) {
-        return `${neighbor} koltuğunda ${genderLabel(neighborTakenGender)} bir yolcu var. Yan yana farklı cinsiyet oturamayacağı için bu koltuğu ${genderLabel(gender)} olarak seçemezsiniz.`;
-      }
-    }
-    return null;
+  // Kendi seçtiğim koltuklar kuralı bağlamaz: aynı rezervasyonda seyahat
+  // edenler yan yana karışık oturabilir.
+  const selectedCodes = useMemo(
+    () => new Set(selected.map((s) => s.code)),
+    [selected]
+  );
+
+  // Yan yana kuralı: bu koltuğa hangi cinsiyet oturabilir? Kural lib/shared.ts'te
+  // duruyor — sunucu da (sepete ekleme, devir) aynı fonksiyonu çağırır.
+  function ruleFor(code: string): SeatGenderRule {
+    return allowedGendersFor(code, { seatMap, layout }, takenGenders, selectedCodes);
   }
 
   function chooseGender(gender: Gender) {
     if (!picking) return;
-    const reason = conflictReason(picking, gender);
+    const reason = genderBlockMessage(picking, gender, ruleFor(picking));
     if (reason) {
       setWarning(reason);
       setPicking(null);
@@ -120,6 +130,19 @@ export default function SeatMap({
 
   const total = selected.length * unitPrice;
 
+  // Koltuğun üzerine gelince görünen açıklama. Kısıtlı koltukta SEBEBİ yazar.
+  function seatTitle(code: string, status: string, gender?: Gender | null) {
+    if (status === "BLOKE") return `${code} — satışa kapalı`;
+    if (status === "SATILDI")
+      return `${code} — dolu${gender ? " (" + genderLabel(gender) + ")" : ""}`;
+    const rule = ruleFor(code);
+    if (!rule.E && !rule.K)
+      return `${code} — iki yanında farklı cinsiyette yolcular var, seçilemiyor`;
+    if (!rule.E) return `${code} — yanında kadın yolcu var, sadece kadın seçebilirsiniz`;
+    if (!rule.K) return `${code} — yanında erkek yolcu var, sadece erkek seçebilirsiniz`;
+    return code;
+  }
+
   function seatClasses(code: string, status: string, gender?: Gender | null) {
     if (isSelected(code)) {
       const g = selected.find((s) => s.code === code)!.gender;
@@ -132,6 +155,19 @@ export default function SeatMap({
       if (gender === "K") return "cursor-not-allowed bg-pink-200 text-pink-700";
       if (gender === "E") return "cursor-not-allowed bg-blue-200 text-blue-800";
       return "cursor-not-allowed bg-slate-300 text-slate-500";
+    }
+    // Boş koltuk: kenarlık rengi hangi cinsiyetin oturabileceğini söyler. Düz
+    // yeşil bırakılsaydı kısıtlı koltuk serbestmiş gibi görünür, müşteri basar
+    // ve reddedilirdi.
+    const rule = ruleFor(code);
+    if (!rule.E && !rule.K) {
+      return "cursor-not-allowed bg-slate-200 text-slate-400";
+    }
+    if (!rule.E) {
+      return "bg-emerald-100 text-emerald-800 ring-2 ring-inset ring-pink-400 hover:bg-emerald-200";
+    }
+    if (!rule.K) {
+      return "bg-emerald-100 text-emerald-800 ring-2 ring-inset ring-blue-400 hover:bg-emerald-200";
     }
     return "bg-emerald-100 text-emerald-800 hover:bg-emerald-200";
   }
@@ -180,14 +216,14 @@ export default function SeatMap({
                       <button
                         key={c}
                         onClick={() => onSeatClick(seat.code, seat.status)}
-                        disabled={seat.status === "SATILDI" || seat.status === "BLOKE"}
-                        title={
-                          seat.status === "BLOKE"
-                            ? `${seat.code} — satışa kapalı`
-                            : seat.status === "SATILDI"
-                            ? `${seat.code} — dolu${seat.gender ? " (" + genderLabel(seat.gender) + ")" : ""}`
-                            : seat.code
+                        disabled={
+                          seat.status === "SATILDI" ||
+                          seat.status === "BLOKE" ||
+                          (seat.status === "BOS" &&
+                            !ruleFor(seat.code).E &&
+                            !ruleFor(seat.code).K)
                         }
+                        title={seatTitle(seat.code, seat.status, seat.gender)}
                         className={`h-8 w-8 rounded-md text-[10px] font-semibold transition ${seatClasses(seat.code, seat.status, seat.gender)}`}
                       >
                         {seat.code}
@@ -209,6 +245,8 @@ export default function SeatMap({
           <Legend className="bg-emerald-100" label="Boş" />
           <Legend className="bg-blue-200" label="Erkek (dolu)" />
           <Legend className="bg-pink-200" label="Kadın (dolu)" />
+          <Legend className="bg-emerald-100 ring-2 ring-inset ring-pink-400" label="Sadece kadın" />
+          <Legend className="bg-emerald-100 ring-2 ring-inset ring-blue-400" label="Sadece erkek" />
           <Legend className="bg-slate-200" label="Kapalı" />
           <Legend className="bg-blue-600" label="Seçtiğiniz" />
         </div>
@@ -255,7 +293,17 @@ export default function SeatMap({
       </aside>
 
       {/* Cinsiyet seçim penceresi */}
-      {picking && (
+      {picking && (() => {
+        // Kural pencere açılırken BİR KEZ hesaplanır: yasaklı cinsiyetin butonu
+        // pasif gelir ve gerekçe pencerenin içinde yazar. Müşteri basıp
+        // reddedilmiyor, basmadan önce nedenini görüyor.
+        const pick = picking;
+        const pickRule = ruleFor(pick);
+        const blockedMsg =
+          (!pickRule.E && genderBlockMessage(pick, "E", pickRule)) ||
+          (!pickRule.K && genderBlockMessage(pick, "K", pickRule)) ||
+          null;
+        return (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={() => setPicking(null)}
@@ -265,18 +313,27 @@ export default function SeatMap({
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-sm text-slate-500">Koltuk</p>
-            <p className="text-2xl font-extrabold text-brand">{picking}</p>
+            <p className="text-2xl font-extrabold text-brand">{pick}</p>
             <p className="mt-2 text-sm text-slate-600">Yolcunun cinsiyetini seçin</p>
+            {blockedMsg && (
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-left text-xs text-amber-800">
+                {blockedMsg}
+              </p>
+            )}
             <div className="mt-4 grid grid-cols-2 gap-3">
               <button
                 onClick={() => chooseGender("E")}
-                className="rounded-xl bg-blue-600 py-3 text-sm font-bold text-white transition hover:bg-blue-700"
+                disabled={!pickRule.E}
+                title={pickRule.E ? "" : genderBlockMessage(pick, "E", pickRule) ?? ""}
+                className="rounded-xl bg-blue-600 py-3 text-sm font-bold text-white transition enabled:hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 Erkek
               </button>
               <button
                 onClick={() => chooseGender("K")}
-                className="rounded-xl bg-pink-600 py-3 text-sm font-bold text-white transition hover:bg-pink-700"
+                disabled={!pickRule.K}
+                title={pickRule.K ? "" : genderBlockMessage(pick, "K", pickRule) ?? ""}
+                className="rounded-xl bg-pink-600 py-3 text-sm font-bold text-white transition enabled:hover:bg-pink-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 Kadın
               </button>
@@ -289,7 +346,8 @@ export default function SeatMap({
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
       </div>
     </div>
   );

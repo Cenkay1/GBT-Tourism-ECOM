@@ -42,9 +42,10 @@ providers.push(
       if (!email || !password) return null;
 
       const user = await prisma.user.findUnique({ where: { email } });
-      // Kullanıcı yoksa ya da yalnızca-Google hesabıysa (passwordHash yok) → null.
-      // Tek tip başarısızlık: enumeration'ı önlemek için ayrım yapılmaz.
-      if (!user || !user.passwordHash) return null;
+      // Kullanıcı yoksa, yalnızca-Google hesabıysa (passwordHash yok) ya da
+      // üyelik PASİFE alınmışsa → null. Tek tip başarısızlık: enumeration'ı
+      // önlemek için ayrım yapılmaz (pasif üye de "hatalı bilgi" görür).
+      if (!user || !user.passwordHash || !user.active) return null;
       const ok = await verifyPassword(password, user.passwordHash);
       if (!ok) return null;
 
@@ -68,6 +69,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   providers,
   callbacks: {
+    // Pasife alınmış üye hiçbir sağlayıcıyla giriş yapamaz. Credentials'ta
+    // authorize zaten engelliyor; bu kontrol GOOGLE akışını da kapatıyor —
+    // orada kullanıcı adapter üzerinden geldiği için authorize hiç çalışmaz.
+    async signIn({ user }) {
+      const email = user?.email ? normalizeEmail(user.email) : null;
+      if (!email) return true;
+      const existing = await prisma.user.findUnique({
+        where: { email },
+        select: { active: true },
+      });
+      if (existing && !existing.active) return false;
+      return true;
+    },
     async jwt({ token, user }) {
       if (user?.id) token.uid = user.id;
       return token;

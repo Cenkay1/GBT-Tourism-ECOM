@@ -2,19 +2,24 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Tour, TourDeparture } from "@/lib/shared";
+import { Tour, TourDeparture, departureIsFull } from "@/lib/shared";
 import SeatMap from "@/components/SeatMap";
 import CapacityBooking from "@/components/CapacityBooking";
 import DepartureSelector from "@/components/DepartureSelector";
+import WaitlistForm from "@/components/WaitlistForm";
 
 export default function BookingLauncher({
   tour,
   className,
   label,
+  waitingByDeparture,
 }: {
   tour: Tour;
   className?: string;
   label?: string;
+  // Sefer id → yedek listede bekleyen kişi sayısı. Sunucuda hesaplanıp
+  // geçiliyor (tur sayfası); dolu seferde müşteriye sıranın uzunluğu yazılsın.
+  waitingByDeparture?: Record<string, number>;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -90,6 +95,16 @@ export default function BookingLauncher({
                 <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   Bu tur için şu anda satışa açık sefer bulunmuyor.
                 </p>
+              ) : departureIsFull(tour, departure) ? (
+                // Sefer dolu: koltuk şeması/kontenjan kutusu yerine yedek liste.
+                // Talep kaybedilmesin — yeterli talep birikirse ek araç
+                // ayarlanır ya da bir iptal çıkınca bekleyen yerleştirilir.
+                <WaitlistForm
+                  key={departure.id}
+                  tourId={tour.id}
+                  departureId={departure.id}
+                  waiting={waitingByDeparture?.[departure.id]}
+                />
               ) : isSeat ? (
                 // Sefer değişince koltuk seçimi sıfırlanmalı: key ile yeniden kur.
                 <SeatMap key={departure.id} tour={tour} departure={departure} />
