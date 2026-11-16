@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useActionState, useEffect, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { genderLabel, bandLabel, formatTime, type AgeBand, type Seat } from "@/lib/shared";
 import type { SeatBoard, SeatOccupant } from "@/lib/seat-board";
-import { toggleSeatBlock } from "@/lib/admin-actions";
+import { toggleSeatBlock, releaseOrphanSeatsAction } from "@/lib/admin-actions";
+import type { FormState } from "@/lib/form-state";
 import {
   unseatPassengerAction,
   placePassengerAction,
@@ -43,6 +44,11 @@ export default function AdminSeatBoard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  // Sahipsiz koltuk onarımı — turuncu uyarının düzeltme düğmesi.
+  const [repairState, repairAction, repairing] = useActionState<FormState, FormData>(
+    releaseOrphanSeatsAction,
+    {}
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panelSeat, setPanelSeat] = useState<string | null>(null);
   const [swapWith, setSwapWith] = useState<string | null>(null); // takas adayının passengerId'si
@@ -358,6 +364,37 @@ export default function AdminSeatBoard({
             Bu koltuklar şemada turuncu çerçeveyle işaretli. Yolcuyu koltuktan çıkarıp yeniden
             yerleştirmek çoğu durumda kaydı düzeltir.
           </p>
+
+          {/* "Sahipsiz koltuk" = dolu görünüyor ama onu tutan yolcu yok.
+              Kaynağı, koltuğu bırakmadan silinmiş eski rezervasyonlar; bu
+              düğme o kalıntıyı temizleyip koltuğu satışa açar. */}
+          {board.issues.some((i) => i.kind === "SAHIPSIZ_KOLTUK") && !isPast && (
+            <form action={repairAction} className="mt-3">
+              <input type="hidden" name="departureId" value={departureId} />
+              <button
+                disabled={repairing}
+                className="rounded-lg bg-orange-600 px-3 py-1.5 text-[11px] font-bold text-white transition enabled:hover:bg-orange-700 disabled:opacity-50"
+              >
+                {repairing
+                  ? "Boşaltılıyor…"
+                  : "Sahipsiz koltukları boşalt ve satışa aç"}
+              </button>
+              <p className="mt-1 text-[11px] text-orange-800">
+                Yalnız yolcusu olmayan dolu koltuklara dokunur; satışa kapattığınız
+                (kırmızı) koltuklar etkilenmez.
+              </p>
+            </form>
+          )}
+          {repairState.message && (
+            <p className="mt-2 rounded-md bg-emerald-50 px-2 py-1.5 text-[11px] text-emerald-700">
+              {repairState.message}
+            </p>
+          )}
+          {repairState.error && (
+            <p className="mt-2 rounded-md bg-red-50 px-2 py-1.5 text-[11px] text-red-600">
+              {repairState.error}
+            </p>
+          )}
         </div>
       )}
 

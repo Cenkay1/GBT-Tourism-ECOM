@@ -27,6 +27,7 @@ model Bus {
   seatMap      String? // serbest koltuk planı (JSON: satır → hücre, hücre = numara ya da "" boşluk). Boşsa eski harfli düzen
   notes        String   @default("")
   active       Boolean  @default(true)
+  deletedAt    DateTime? // çöp kutusu (bkz. Tour.deletedAt)
   createdAt    DateTime @default(now())
 
   tours      Tour[]
@@ -72,6 +73,11 @@ model Tour {
   features          String    @default("[]") // seçili özellik id'leri (JSON dizi)
   excludedFeatures  String    @default("[]") // fiyata dahil OLMAYAN özellik id'leri (JSON dizi)
   status            String    @default("YAYINDA") // TASLAK | YAYINDA
+  // Çöp kutusu: silme işareti. Dolu olan kayıt hiçbir listede görünmez ama
+  // ilişkileri (seferler, koltuklar, rezervasyonlar) OLDUĞU GİBİ durur —
+  // 25 gün içinde geri yüklenebilsin diye. Süre dolunca kalıcı silinir.
+  // Filtre tek yerden uygulanıyor: lib/db.ts istemci uzantısı.
+  deletedAt         DateTime?
   createdAt         DateTime  @default(now())
 
   seats      Seat[]
@@ -184,6 +190,13 @@ model Booking {
   // Fatura hangi yolcu adına kesilecek (0 tabanlı sıra). roomIndex ile aynı
   // konvansiyon: yolcular iç içe oluşturulduğu için form aşamasında id yok.
   invoicePassengerIndex Int?
+  // Kullanılan indirim kuponu ve düştüğü tutar. totalAmount kupon DÜŞÜLMÜŞ
+  // tutardır (müşterinin ödeyeceği para); couponAmount yalnız "ne kadar
+  // indirim uygulandı" bilgisini saklar — fatura ve ciro raporları indirimi
+  // ayrıca görebilsin.
+  couponId              String?        @unique
+  coupon                Coupon?        @relation(fields: [couponId], references: [id])
+  couponAmount          Int            @default(0)
   createdAt             DateTime       @default(now())
 
   passengers  Passenger[]
@@ -237,9 +250,10 @@ model Passenger {
 }
 
 model Banner {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
+  deletedAt DateTime? // çöp kutusu (bkz. Tour.deletedAt)
   title     String
-  subtitle  String   @default("")
+  subtitle  String    @default("")
   image     String
   linkUrl   String   @default("")
   sortOrder Int      @default(0)
@@ -282,6 +296,7 @@ model User {
   pointsLog       PointsLedger[]
   savedPassengers SavedPassenger[]
   waitlist        Waitlist[]
+  coupons         Coupon[]
 }
 
 // Yedek liste kaydı — otobüs/kontenjan DOLUYKEN alınan koltuksuz talep.
@@ -389,19 +404,57 @@ model PointsLedger {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   bookingId String? // kaynağı olan rezervasyon (opsiyonel)
   delta     Int // +kazanım / -harcama
-  reason    String // KAZANIM | HOSGELDIN | DUZELTME | IPTAL
+  reason    String // KAZANIM | HOSGELDIN | DUZELTME | IPTAL | KUPON | KUPON_IPTAL
   note      String   @default("")
   createdAt DateTime @default(now())
 }
 
+// İndirim kuponu — ödemede girilerek tutardan düşülen TL değeri.
+//
+// İki yoldan doğar:
+//   • Müşteri puanını çevirir (POINTS_PER_LIRA puan = 1 ₺). Çevrilen puan
+//     anında düşülür ve PointsLedger'a "KUPON" satırı yazılır; kupon iptal
+//     edilirse puan geri yüklenir ("KUPON_IPTAL").
+//   • Admin elle oluşturur (kampanya, özür, telefonla verilen indirim).
+//     Bu durumda pointsSpent = 0 ve userId boş bırakılabilir.
+//
+// Tek kullanımlıktır: bir rezervasyonda kullanılır, artan kısım YANAR (para
+// üstü verilmez) — müşteri kullanmadan önce uyarılır.
+model Coupon {
+  id     String @id @default(cuid())
+  // Müşterinin gireceği kod. Okunması kolay olsun diye büyük harf + rakam,
+  // karıştırılan karakterler (0/O, 1/I) üretimde dışarıda bırakılır.
+  code   String @unique
+  amount Int // kuponun TL değeri
+
+  // Sahibi. Puan karşılığı üretilen kuponda zorunlu; admin kampanya
+  // kuponunda boş olabilir (kodu bilen herkes kullanır).
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  pointsSpent Int    @default(0) // karşılığında düşülen puan (admin kuponunda 0)
+  status      String @default("AKTIF") // AKTIF | KULLANILDI | IPTAL | SURE_DOLDU
+  note        String @default("") // admin notu / kampanya adı
+
+  usedAt    DateTime?
+  expiresAt DateTime? // boşsa süresiz
+  createdBy String    @default("MUSTERI") // MUSTERI | ADMIN
+  createdAt DateTime  @default(now())
+
+  booking Booking?
+
+  @@index([userId, status])
+}
+
 // Tura eklenebilecek özellik/hizmet (Konaklama, Kahvaltı, Rehber…). Admin panelden yönetilir.
 model Amenity {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   name      String
-  icon      String   @default("") // emoji, örn. "🍳" (opsiyonel)
-  active    Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  icon      String    @default("") // emoji, örn. "🍳" (opsiyonel)
+  active    Boolean   @default(true)
+  sortOrder Int       @default(0)
+  deletedAt DateTime? // çöp kutusu (bkz. Tour.deletedAt)
+  createdAt DateTime  @default(now())
 }
 
 // "Tatil & Otel" bize ulaşın formundan gelen talep. Sadece iletişim bilgisi

@@ -19,8 +19,17 @@
 // Not: placesToVisit kolonu SİLİNMEZ (veri güvenliği). Prisma okumadığı için
 // zararsızdır; istenirse sonradan elle düşürülebilir.
 import { existsSync, statSync } from "node:fs";
-import { prisma } from "../lib/db";
+// FİLTRESİZ istemci: lib/db.ts'ten export edilen `prisma` çöp kutusu filtresi
+// (deletedAt: null) uyguluyor. Göç burada iki yüzden onu KULLANAMAZ:
+//   1. Filtre her okumaya `deletedAt` koşulu ekliyor, ama kolonu bu script
+//      oluşturuyor — henüz yokken sorgu "column does not exist" ile patlar
+//      (canlıda göçün ilk satırında çökerdi).
+//   2. Göç, silinmiş kayıtları da görmek zorunda: onların da seferleri
+//      onarılmalı, kolonları eklenmeli.
+import { rawPrismaClient } from "../lib/db";
 import { repairSeatIndexes, repairSeatlessDepartures } from "../lib/seat-index-repair";
+
+const prisma = rawPrismaClient();
 
 type ColumnInfo = { name: string };
 
@@ -342,6 +351,35 @@ async function main() {
     console.log("  = Waitlist tablosu zaten var");
   }
 
+  // Coupon — indirim kuponları (puan karşılığı ya da kampanya).
+  if (!(await tableExists("Coupon"))) {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE "Coupon" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "code" TEXT NOT NULL,
+        "amount" INTEGER NOT NULL,
+        "userId" TEXT,
+        "pointsSpent" INTEGER NOT NULL DEFAULT 0,
+        "status" TEXT NOT NULL DEFAULT 'AKTIF',
+        "note" TEXT NOT NULL DEFAULT '',
+        "usedAt" DATETIME,
+        "expiresAt" DATETIME,
+        "createdBy" TEXT NOT NULL DEFAULT 'MUSTERI',
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "Coupon_userId_fkey" FOREIGN KEY ("userId")
+          REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )`);
+    await prisma.$executeRawUnsafe(
+      `CREATE UNIQUE INDEX "Coupon_code_key" ON "Coupon"("code")`
+    );
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX "Coupon_userId_status_idx" ON "Coupon"("userId", "status")`
+    );
+    console.log("  + Coupon tablosu");
+  } else {
+    console.log("  = Coupon tablosu zaten var");
+  }
+
   console.log("== 2. Kolonlar ==");
   let added = 0;
   const add = async (t: string, c: string, ddl: string) => {
@@ -416,6 +454,17 @@ async function main() {
 
   // User — üyelik aktif mi (admin "pasife al"). Mevcut üyeler aktif sayılır.
   await add("User", "active", `"active" BOOLEAN NOT NULL DEFAULT true`);
+
+  // Kupon: rezervasyona bağlı indirim kuponu ve düşen tutar.
+  await add("Booking", "couponId", `"couponId" TEXT`);
+  await add("Booking", "couponAmount", `"couponAmount" INTEGER NOT NULL DEFAULT 0`);
+
+  // Çöp kutusu ("Son Silinenler"): silme işareti. NULL = silinmemiş, yani
+  // mevcut kayıtların hepsi aktif kalır.
+  await add("Tour", "deletedAt", `"deletedAt" DATETIME`);
+  await add("Banner", "deletedAt", `"deletedAt" DATETIME`);
+  await add("Bus", "deletedAt", `"deletedAt" DATETIME`);
+  await add("Amenity", "deletedAt", `"deletedAt" DATETIME`);
 
   if (added === 0) console.log("  = eksik kolon yok");
 

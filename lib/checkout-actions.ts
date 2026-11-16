@@ -84,6 +84,10 @@ export async function submitCheckout(fd: FormData) {
     // Ödeme planı: "ON_ODEME" seçildiyse kapora ile rezerve. Geçerliliği
     // (turda ön ödeme açık mı) sunucuda createPendingBooking denetler.
     paymentPlan: s(fd, "odemePlani") === "ON_ODEME" ? "DEPOSIT" : "FULL",
+    // Kupon kodu: doğrulama ve tutardan düşme SUNUCUDA (lib/booking.ts).
+    // Geçersiz kodda rezervasyon açılmaz — müşteri indirim bekleyip tam
+    // ücret ödemesin.
+    couponCode: s(fd, "kuponKodu") || undefined,
   });
 
   if (!result.ok) {

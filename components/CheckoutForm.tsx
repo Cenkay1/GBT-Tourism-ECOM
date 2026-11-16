@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import ConsentCheckboxes from "@/components/ConsentCheckboxes";
 import {
   Gender,
@@ -32,6 +32,7 @@ import {
   type PaymentPlan,
   ROOM_MAX_GUESTS,
 } from "@/lib/shared";
+import { checkCouponAction } from "@/lib/coupon-actions";
 import { COUNTRIES } from "@/lib/countries";
 import type { SavedPassengerView } from "@/lib/saved-passengers";
 import RoomsEditor, { packRooms } from "@/components/RoomsEditor";
@@ -216,14 +217,44 @@ export default function CheckoutForm({
   // Ödeme planı: peşin mi, ön ödeme (kapora) ile rezerve mi. İKİ koşul birlikte
   // gerekir — turda ön ödeme açık olmalı VE kalkışa DEPOSIT_CUTOFF_DAYS günden
   // fazla kalmalı. Sunucu da aynı kuralı doğrular (lib/booking.ts).
+  // İndirim kuponu. Tutarı burada göstermek için tutuyoruz; gerçek düşme
+  // rezervasyon açılırken SUNUCUDA yapılıyor (lib/booking.ts) — istemciden
+  // gelen indirim tutarına güvenilmez.
+  const [couponCode, setCouponCode] = useState("");
+  const [couponAmount, setCouponAmount] = useState(0);
+  const [couponError, setCouponError] = useState("");
+  const [couponChecking, startCouponCheck] = useTransition();
+
   const depositOffered = depositPercent > 0;
   const depositInTime = depositAvailableFor(departureDate);
   const depositEnabled = depositOffered && depositInTime;
   const [plan, setPlan] = useState<PaymentPlan>("FULL");
   const effectivePlan: PaymentPlan = depositEnabled ? plan : "FULL";
-  const depositAmount = depositEnabled ? depositFor(priced.total, depositPercent) : 0;
-  const dueNow = effectivePlan === "DEPOSIT" ? depositAmount : priced.total;
-  const remaining = Math.max(0, priced.total - dueNow);
+  // Kupon düşülmüş ödenecek tutar. Kupon toplamdan büyükse 0'a çekilir ve
+  // artan kısım YANAR (para üstü verilmez) — müşteri aşağıda uyarılıyor.
+  const netTotal = Math.max(0, priced.total - couponAmount);
+  const couponApplied = Math.min(couponAmount, priced.total);
+  const depositAmount = depositEnabled ? depositFor(netTotal, depositPercent) : 0;
+  const dueNow = effectivePlan === "DEPOSIT" ? depositAmount : netTotal;
+  const remaining = Math.max(0, netTotal - dueNow);
+
+  function applyCoupon() {
+    const code = couponCode.trim();
+    setCouponError("");
+    if (!code) {
+      setCouponAmount(0);
+      return;
+    }
+    startCouponCheck(async () => {
+      const res = await checkCouponAction(code);
+      if (res.ok && res.amount != null) {
+        setCouponAmount(res.amount);
+      } else {
+        setCouponAmount(0);
+        setCouponError(res.error ?? "Kupon uygulanamadı.");
+      }
+    });
+  }
   const balanceDue = balanceDueDateFor(departureDate, balanceDueDays);
 
   const input =
@@ -677,9 +708,59 @@ export default function CheckoutForm({
             </p>
           )}
         </div>
+        {couponApplied > 0 && (
+          <SummaryRow
+            label="Kupon indirimi"
+            value={`- ${formatPrice(couponApplied, currency)}`}
+          />
+        )}
         <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-base font-extrabold text-brand">
           <span>Toplam</span>
-          <span className="text-accent">{formatPrice(priced.total, currency)}</span>
+          <span className="text-accent">{formatPrice(netTotal, currency)}</span>
+        </div>
+        {couponAmount > priced.total && (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            Kupon tutarı rezervasyon tutarından yüksek. Aradaki{" "}
+            {formatPrice(couponAmount - priced.total, currency)} iade edilmez ve kupon
+            tek kullanımlık olduğu için bu farkı kaybedersiniz.
+          </p>
+        )}
+
+        {/* İndirim kuponu */}
+        <div className="mt-4 border-t border-slate-100 pt-4">
+          <p className="text-sm font-bold text-brand">İndirim Kuponu</p>
+          <input type="hidden" name="kuponKodu" value={couponAmount > 0 ? couponCode.trim() : ""} />
+          <div className="mt-2 flex gap-2">
+            <input
+              value={couponCode}
+              onChange={(e) => {
+                setCouponCode(e.target.value);
+                setCouponAmount(0);
+                setCouponError("");
+              }}
+              placeholder="GBT-XXXX-XXXX"
+              className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm uppercase outline-none focus:border-brand"
+            />
+            <button
+              type="button"
+              onClick={applyCoupon}
+              disabled={couponChecking || !couponCode.trim()}
+              className="shrink-0 rounded-lg bg-brand px-4 py-2 text-sm font-bold text-white transition enabled:hover:bg-brand/90 disabled:opacity-40"
+            >
+              {couponChecking ? "Kontrol…" : "Uygula"}
+            </button>
+          </div>
+          {couponError && (
+            <p className="mt-2 text-xs text-red-600">{couponError}</p>
+          )}
+          {couponAmount > 0 && !couponError && (
+            <p className="mt-2 text-xs font-medium text-emerald-700">
+              {formatPrice(couponAmount, currency)} değerinde kupon uygulandı.
+            </p>
+          )}
+          <p className="mt-1 text-[11px] text-slate-400">
+            Puanlarınızı Hesabım → Puanlarım sayfasından kupona çevirebilirsiniz.
+          </p>
         </div>
 
         {/* Turda ön ödeme açık ama kalkış yakın: seçenek yerine gerekçe yazılır.

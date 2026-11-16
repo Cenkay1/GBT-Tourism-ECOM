@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runDepartureReminders, runBalanceReminders } from "@/lib/notifications";
 import { releaseUnpaidBalances } from "@/lib/booking";
+import { purgeExpiredTrash } from "@/lib/trash";
 
 // Zamanlanmış rezervasyon işleri. Dışarıdan bir zamanlayıcıyla (Vercel Cron
 // veya sunucu cron'u) periyodik çağrılır — günde en az bir kez çalışmalı.
@@ -9,6 +10,7 @@ import { releaseUnpaidBalances } from "@/lib/booking";
 //      (kalkışa 6 gün) bakiye hatırlatması
 //   3. Son ödeme tarihi geçmiş ve bakiyesi kapanmamış rezervasyonların iptali
 //      (koltuklar satışa açılır, müşteriye ve acenteye bilgi gider)
+//   4. Çöp kutusunda saklama süresi dolan kayıtların kalıcı silinmesi
 //
 // Sıra önemli: hatırlatma iptalden ÖNCE çalışır ki aynı koşuda hem hatırlatma
 // alıp hem iptal edilen bir rezervasyon oluşmasın.
@@ -27,12 +29,17 @@ async function handle(req: Request): Promise<Response> {
   const reminders = await runDepartureReminders();
   const balanceReminders = await runBalanceReminders();
   const released = await releaseUnpaidBalances();
+  // Çöp kutusu temizliği en sonda ve hata yutularak: kalıcı silme başarısız
+  // olsa bile hatırlatmaların sonucu kaybolmasın (sayfa açılışında da
+  // tetikleniyor, bir sonraki koşuda tekrar denenir).
+  const trash = await purgeExpiredTrash().catch(() => ({ purged: 0 }));
   return NextResponse.json({
     ok: true,
     sent: reminders.sent,
     balanceRemindersSent: balanceReminders.sent,
     unpaidCancelled: released.cancelled,
     unpaidFailed: released.failed.length,
+    trashPurged: trash.purged,
   });
 }
 

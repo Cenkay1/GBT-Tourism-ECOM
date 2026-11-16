@@ -26,6 +26,8 @@ import {
   cancelBookingByAdmin,
   changeBookingSeat,
   ensureBalanceSchedule,
+  deleteBookingRecord,
+  releaseOrphanSeats,
 } from "@/lib/booking";
 import {
   recordCollection,
@@ -45,6 +47,14 @@ import {
   cancelWaitlistEntry,
   updateWaitlistNote,
 } from "@/lib/waitlist";
+import {
+  softDeleteRecord,
+  restoreRecord,
+  purgeRecord,
+  purgeExpiredTrash,
+  type TrashModel,
+} from "@/lib/trash";
+import { createAdminCoupon, adjustUserPoints } from "@/lib/coupons";
 import { checkConsent, clientIpFrom } from "@/lib/consent";
 import { startPayment } from "@/lib/payment";
 import { tourSaveErrorMessage, newErrorRef } from "@/lib/tour-save-errors";
@@ -599,11 +609,17 @@ export async function updateTour(id: string, fd: FormData) {
   redirect("/admin/turlar");
 }
 
+// Silme artık KALICI DEĞİL: kayıt çöp kutusuna taşınır ve 25 gün içinde geri
+// alınabilir (bkz. lib/trash.ts). Turun seferleri, koltukları ve
+// rezervasyonları olduğu gibi durur — kalıcı silinene kadar hiçbir satır
+// kaybolmaz.
 export async function deleteTour(id: string) {
   await requireAdmin();
-  await prisma.tour.delete({ where: { id } });
+  const res = await softDeleteRecord("Tour", id);
+  if (!res.ok) throw new Error(res.error);
   revalidatePath("/");
   revalidatePath("/admin/turlar");
+  revalidatePath("/admin/son-silinenler");
 }
 
 // ---- KOLTUK YÖNETİMİ (BLOKE) ----
@@ -671,6 +687,30 @@ function busCodes(b: {
   return map
     ? seatMapCodes(map)
     : seatCodes((b.vehicleType as VehicleType) in VEHICLES ? (b.vehicleType as VehicleType) : "OTOBUS", b.seatRows, b.backRowFull);
+}
+
+// Sahipsiz dolu koltukları boşalt — koltuk tahtasındaki turuncu "tutarsız
+// kayıt" uyarısının düzeltme düğmesi. Geçmişte koltuğu bırakmadan silinmiş
+// rezervasyonların kalıntısını temizler (bkz. lib/booking.ts releaseOrphanSeats).
+export async function releaseOrphanSeatsAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const departureId = str(fd, "departureId");
+  if (!departureId) return { ok: false, error: "Sefer belirtilmedi." };
+
+  const res = await releaseOrphanSeats(departureId);
+  revalidatePath("/admin/turlar", "layout");
+  revalidatePath("/turlar", "layout");
+  revalidatePath("/");
+
+  if (res.released === 0)
+    return { ok: true, message: "Boşaltılacak sahipsiz koltuk bulunmadı." };
+  return {
+    ok: true,
+    message: `${res.released} sahipsiz koltuk satışa açıldı: ${res.codes.join(", ")}`,
+  };
 }
 
 export async function createBus(fd: FormData) {
@@ -753,8 +793,10 @@ export async function deleteBus(id: string) {
       )}`
     );
   }
-  await prisma.bus.delete({ where: { id } });
+  const res = await softDeleteRecord("Bus", id);
+  if (!res.ok) throw new Error(res.error);
   revalidatePath("/admin/otobusler");
+  revalidatePath("/admin/son-silinenler");
 }
 
 export async function toggleBus(id: string, active: boolean) {
@@ -802,9 +844,11 @@ export async function updateBanner(id: string, fd: FormData) {
 
 export async function deleteBanner(id: string) {
   await requireAdmin();
-  await prisma.banner.delete({ where: { id } });
+  const res = await softDeleteRecord("Banner", id);
+  if (!res.ok) throw new Error(res.error);
   revalidatePath("/");
   revalidatePath("/admin/afisler");
+  revalidatePath("/admin/son-silinenler");
 }
 
 export async function toggleBanner(id: string, active: boolean) {
@@ -853,9 +897,11 @@ export async function updateAmenity(id: string, fd: FormData) {
 
 export async function deleteAmenity(id: string) {
   await requireAdmin();
-  await prisma.amenity.delete({ where: { id } });
+  const res = await softDeleteRecord("Amenity", id);
+  if (!res.ok) throw new Error(res.error);
   revalidatePath("/admin/ozellikler");
   revalidatePath("/admin/turlar");
+  revalidatePath("/admin/son-silinenler");
 }
 
 export async function toggleAmenity(id: string, active: boolean) {
@@ -867,12 +913,31 @@ export async function toggleAmenity(id: string, active: boolean) {
 
 // ---- REZERVASYON ----
 
+// "YYYY-MM-DD" biçiminde, geçmişte ve makul aralıkta bir tarih mi?
+// Geçersizse yolcu tam ücrete yazılır (uydurma tarihle indirim alınamaz).
+function isValidBirthDate(value?: string): boolean {
+  const v = value?.trim();
+  if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  if (d > now) return false; // gelecekte doğmuş yolcu yok
+  return d.getFullYear() >= 1900;
+}
+
+
 interface ManualPassengerInput {
   firstName?: string;
   lastName?: string;
   idNumber?: string;
   seatCode?: string;
   gender?: "E" | "K";
+  // Doğum tarihi elden satışta da alınır: yaş bandı (0-3 ücretsiz, 4-6 %50)
+  // ve yaş doğrulama bundan hesaplanıyor. Alınmadığı sürece elden satılan
+  // çocuk yolcu tam ücrete yazılıyordu.
+  birthDate?: string;
+  // Görevli yaşı belgeden doğruladı mı (indirim bunu gerektiriyor).
+  ageDocumentVerified?: boolean;
 }
 
 export async function createManualBooking(fd: FormData) {
@@ -902,6 +967,10 @@ export async function createManualBooking(fd: FormData) {
       idNumber: p.idNumber?.trim() || undefined,
       seatCode: p.seatCode?.trim() || undefined,
       gender: p.gender === "E" || p.gender === "K" ? p.gender : undefined,
+      // Biçimi geçersizse YOK sayılır — uydurma tarih indirim sağlamaz
+      // (createPendingBooking belge adlarında da aynı kuralı uyguluyor).
+      birthDate: isValidBirthDate(p.birthDate) ? p.birthDate!.trim() : undefined,
+      ageDocumentVerified: p.ageDocumentVerified === true,
     }));
 
   let seatCodes: string[] = [];
@@ -1115,9 +1184,140 @@ export async function changeBookingSeatAction(_prev: FormState, fd: FormData): P
 
 export async function deleteBooking(id: string) {
   await requireAdmin();
-  await prisma.booking.delete({ where: { id } });
+  // deleteBookingRecord koltukları serbest bırakır ve puanı geri alır.
+  // Düz prisma.booking.delete ikisini de atlıyordu: koltuk "sahipsiz dolu"
+  // kalıp bir daha satılamıyor, puan üyede kalıyordu.
+  const res = await deleteBookingRecord(id);
+  if (!res.ok) throw new Error(res.error ?? "Rezervasyon silinemedi.");
   revalidatePath("/admin/rezervasyonlar");
+  // Koltuklar boşaldı: tur sayfası ve koltuk tahtası tazelenmeli.
+  revalidatePath("/admin/turlar", "layout");
+  revalidatePath("/turlar", "layout");
+  revalidatePath("/");
   redirect("/admin/rezervasyonlar");
+}
+
+// ---- KUPON VE PUAN ----
+
+// Admin kuponu: kampanya, özür ya da telefonla verilen indirim. Puan
+// karşılığı DEĞİL (bkz. lib/coupons.ts createAdminCoupon).
+export async function createCouponAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const amount = num(fd, "amount");
+  const userId = str(fd, "userId") || null;
+  const gun = num(fd, "expiresInDays");
+
+  const res = await createAdminCoupon({
+    amount,
+    note: str(fd, "note"),
+    userId,
+    // Gün verilmezse süresiz.
+    expiresAt: gun > 0 ? new Date(Date.now() + gun * 86400000) : null,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { id: res.couponId },
+    select: { code: true, amount: true },
+  });
+
+  revalidatePath("/admin/kuponlar");
+  if (userId) revalidatePath(`/admin/uyeler/${userId}`);
+
+  return {
+    ok: true,
+    message: `Kupon oluşturuldu: ${coupon?.code} (${coupon?.amount} ₺)`,
+  };
+}
+
+export async function cancelCouponAction(id: string) {
+  await requireAdmin();
+  // Kullanılmış kupon iptal EDİLEMEZ: rezervasyonun tutarı o indirimle
+  // hesaplandı, kuponu geçersiz kılmak muhasebeyi kayda uymaz hâle getirir.
+  const coupon = await prisma.coupon.findUnique({
+    where: { id },
+    select: { status: true },
+  });
+  if (!coupon) throw new Error("Kupon bulunamadı.");
+  if (coupon.status === "KULLANILDI")
+    throw new Error(
+      "Kullanılmış kupon iptal edilemez — rezervasyon tutarı bu indirimle hesaplandı."
+    );
+
+  await prisma.coupon.update({ where: { id }, data: { status: "IPTAL" } });
+  revalidatePath("/admin/kuponlar");
+}
+
+// Üyenin puanını elle ekle/çıkar.
+export async function adjustPointsAction(
+  _prev: FormState,
+  fd: FormData
+): Promise<FormState> {
+  await requireAdmin();
+  const userId = str(fd, "userId");
+  const delta = num(fd, "delta");
+  if (!userId) return { ok: false, error: "Üye belirtilmedi." };
+
+  const res = await adjustUserPoints(userId, delta, str(fd, "note"));
+  if (!res.ok) return { ok: false, error: res.error ?? "Puan güncellenemedi." };
+
+  revalidatePath(`/admin/uyeler/${userId}`);
+  revalidatePath("/admin/uyeler");
+  const applied = res.applied ?? 0;
+  return {
+    ok: true,
+    message: `${applied > 0 ? "+" : ""}${applied.toLocaleString("tr-TR")} puan işlendi.`,
+  };
+}
+
+// ---- ÇÖP KUTUSU (SON SİLİNENLER) ----
+
+export async function restoreTrashAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  await requireAdmin();
+  const model = str(fd, "model") as TrashModel;
+  const id = str(fd, "id");
+  if (!model || !id) return { ok: false, error: "Kayıt belirtilmedi." };
+
+  const res = await restoreRecord(model, id);
+  if (!res.ok) return { ok: false, error: res.error };
+
+  revalidateTrashTargets();
+  return { ok: true, message: "Kayıt geri yüklendi." };
+}
+
+export async function purgeTrashAction(_prev: FormState, fd: FormData): Promise<FormState> {
+  await requireAdmin();
+  const model = str(fd, "model") as TrashModel;
+  const id = str(fd, "id");
+  if (!model || !id) return { ok: false, error: "Kayıt belirtilmedi." };
+
+  const res = await purgeRecord(model, id);
+  if (!res.ok) return { ok: false, error: res.error };
+
+  revalidateTrashTargets();
+  return { ok: true, message: "Kayıt kalıcı olarak silindi." };
+}
+
+// Geri yükleme/kalıcı silme kaydı her yerde etkiliyor: tur listeleri, afişler,
+// otobüsler, özellikler ve müşteri tarafı.
+function revalidateTrashTargets() {
+  revalidatePath("/admin/son-silinenler");
+  revalidatePath("/admin/turlar", "layout");
+  revalidatePath("/admin/afisler");
+  revalidatePath("/admin/otobusler");
+  revalidatePath("/admin/ozellikler");
+  revalidatePath("/turlar", "layout");
+  revalidatePath("/");
+}
+
+// Süresi dolanları temizle — çöp kutusu sayfası açıldığında da çağrılır,
+// böylece günlük cron bir gün kaçırsa bile liste doğru kalır.
+export async function purgeExpiredTrashAction(): Promise<{ purged: number }> {
+  await requireAdmin();
+  return purgeExpiredTrash();
 }
 
 // ---- YORUMLAR ----

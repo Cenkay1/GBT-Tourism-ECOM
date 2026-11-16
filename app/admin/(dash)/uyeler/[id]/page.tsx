@@ -7,6 +7,8 @@ import { ChevronRightIcon, CheckCircleIcon } from "@/components/Icons";
 import MemberActiveToggle from "@/components/admin/MemberActiveToggle";
 import MemberDangerZone from "@/components/admin/MemberDangerZone";
 import { memberDeletionImpact } from "@/lib/members";
+import PointsAdjustForm from "@/components/admin/PointsAdjustForm";
+import CouponForm from "@/components/admin/CouponForm";
 
 export const dynamic = "force-dynamic";
 
@@ -244,6 +246,10 @@ export default async function AdminMemberDetail({
                 : "En üst kademede."}
             </p>
           </section>
+
+          <PointsAdjustForm userId={user.id} currentPoints={user.points} />
+
+          <CouponForm userId={user.id} userLabel={user.name ?? user.email} />
 
           <MemberDangerZone
             id={user.id}

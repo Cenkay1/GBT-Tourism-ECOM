@@ -11,6 +11,8 @@ import {
   UserIcon,
   CheckIcon,
   HeadsetIcon,
+  ClockIcon,
+  GiftIcon,
 } from "@/components/Icons";
 
 const items = [
@@ -23,7 +25,9 @@ const items = [
   { href: "/admin/talepler", label: "Talepler", Icon: HeadsetIcon },
   { href: "/admin/yedek-liste", label: "Yedek Liste", Icon: UsersIcon },
   { href: "/admin/uyeler", label: "Üyeler", Icon: UserIcon },
+  { href: "/admin/kuponlar", label: "Kuponlar", Icon: GiftIcon },
   { href: "/admin/yorumlar", label: "Yorumlar", Icon: UsersIcon },
+  { href: "/admin/son-silinenler", label: "Son Silinenler", Icon: ClockIcon },
 ];
 
 export default function AdminNav({ mobile = false }: { mobile?: boolean }) {

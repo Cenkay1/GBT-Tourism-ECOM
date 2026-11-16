@@ -12,10 +12,19 @@ import {
   depositFor,
   balanceDueDateFor,
   formatDate,
+  passengerFareBand,
+  needsIdDocument,
+  fareBandLabel,
   HOLD_MINUTES,
 } from "@/lib/shared";
 
 interface PassRow {
+  // Yaş bandı (0-3 ücretsiz, 4-6 %50 indirimli) doğum tarihinden hesaplanıyor;
+  // elden satışta da alınmalı, aksi halde çocuk yolcu tam ücrete yazılır.
+  birthDate?: string;
+  // İndirim yaşın BELGEYLE doğrulanmasını gerektiriyor. Online müşteri kimlik
+  // görseli yükler; gişede görevli belgeyi önünde gördüğünü onaylar.
+  ageDocumentVerified?: boolean;
   seatCode?: string;
   firstName: string;
   lastName: string;
@@ -29,6 +38,8 @@ const emptyRow = (seatCode?: string): PassRow => ({
   lastName: "",
   idNumber: "",
   gender: "",
+  birthDate: "",
+  ageDocumentVerified: false,
 });
 
 export default function AdminSaleForm({
@@ -298,7 +309,7 @@ export default function AdminSaleForm({
             {rows.map((r, i) => (
               <div
                 key={r.seatCode ?? i}
-                className="grid gap-2 rounded-xl border border-slate-100 p-3 sm:grid-cols-[auto_1fr_1fr_1fr_auto]"
+                className="grid gap-2 rounded-xl border border-slate-100 p-3 sm:grid-cols-[auto_1fr_1fr_1fr_auto_auto]"
               >
                 <span className="flex items-center text-xs font-semibold text-slate-400">
                   {r.seatCode ? `Koltuk ${r.seatCode}` : `#${i + 1}`}
@@ -330,6 +341,47 @@ export default function AdminSaleForm({
                   <option value="E">{genderLabel("E")}</option>
                   <option value="K">{genderLabel("K")}</option>
                 </select>
+                <input
+                  type="date"
+                  title="Doğum tarihi — yaş indirimi buradan hesaplanır"
+                  value={r.birthDate ?? ""}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => updateRow(i, { birthDate: e.target.value })}
+                  className="rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-brand"
+                />
+
+                {/* İndirimli banda denk gelen yolcuda belge onayı istenir:
+                    indirim ancak yaş belgeyle doğrulanmışsa uygulanır. */}
+                {(() => {
+                  if (!r.birthDate) return null;
+                  const band = passengerFareBand(
+                    { birthDate: r.birthDate },
+                    tour.departureDate,
+                    Boolean(tour.hasAccommodation)
+                  );
+                  if (!needsIdDocument(band)) return null;
+                  return (
+                    <label className="flex items-center gap-2 text-xs text-slate-600 sm:col-span-6">
+                      <input
+                        type="checkbox"
+                        checked={r.ageDocumentVerified ?? false}
+                        onChange={(e) =>
+                          updateRow(i, { ageDocumentVerified: e.target.checked })
+                        }
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                      <span>
+                        <strong>{fareBandLabel(band)}</strong> indirimi için yaşı
+                        kimlik belgesinden doğruladım.
+                        {!r.ageDocumentVerified && (
+                          <span className="ml-1 text-amber-700">
+                            Onaylanmazsa tam ücret uygulanır.
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })()}
               </div>
             ))}
           </div>

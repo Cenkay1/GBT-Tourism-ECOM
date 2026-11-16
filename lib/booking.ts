@@ -73,6 +73,12 @@ export interface PassengerInput {
   seatCode?: string;
   gender?: "E" | "K";
   birthDate?: string; // yyyy-mm-dd
+  // ELDEN SATIŞ: görevli yolcunun yaşını belgeden bizzat doğruladı.
+  // Online akışta indirim için kimlik görseli yüklenir (hasIdDocument);
+  // gişede belge yükleme akışı yok ama görevli çocuğu ve kimliğini önünde
+  // görüyor. Bu onay o yerine geçer ve yalnız allowPast/allowBlocked ile
+  // gelen admin satışlarında dikkate alınır (bkz. ageDocVerified).
+  ageDocumentVerified?: boolean;
   nationality?: "TC" | "FOREIGN";
   country?: string;
   roomIndex?: number; // konaklamalı turda yolcunun odası (0 tabanlı)
@@ -105,6 +111,9 @@ export interface CreateBookingInput {
   // sessizce peşine düşülür (istemciden gelen değer tek başına indirim/
   // erteleme hakkı doğurmaz).
   paymentPlan?: PaymentPlan;
+  // Ödemede girilen indirim kuponu kodu. Doğrulama ve tutardan düşme
+  // SUNUCUDA yapılır (bkz. applyCouponTo); istemciden gelen tutara güvenilmez.
+  couponCode?: string;
 }
 
 // Fatura hangi yolcu adına kesilecek: yalnız 0 ile yolcu sayısı arasında
@@ -150,6 +159,16 @@ export async function releaseExpiredHolds(): Promise<void> {
     include: { passengers: true, tour: { select: { id: true } } },
   });
   for (const b of expired) {
+    // Ödenmeden süresi dolan rezervasyonun kuponu geri açılır.
+    if (b.couponId) {
+      try {
+        const { releaseCoupon } = await import("@/lib/coupons");
+        await releaseCoupon(b.couponId);
+      } catch (e) {
+        console.error("[Süre dolumu: kupon geri açma hatası]", e);
+      }
+    }
+
     const seatCodes = b.passengers
       .map((p) => p.seatCode)
       .filter((c): c is string => !!c);
@@ -267,10 +286,20 @@ export async function createPendingBooking(
     p.idDocument && isValidIdDocumentName(p.idDocument) ? p.idDocument : null
   );
 
+  // İndirim için yaşın BELGEYLE doğrulanmış olması gerekiyor. İki yol var:
+  //   • Online: müşteri kimlik görseli yükler (docNames).
+  //   • Elden satış: görevli belgeyi gişede görür ve onaylar.
+  // İkinci yol yalnız admin satışlarında (allowBlocked) geçerli: istemciden
+  // gelen bir bayrakla indirim alınmasın.
+  const agentMayVerify = Boolean(input.allowBlocked);
+  const ageDocVerified = input.passengers.map(
+    (p, i) => Boolean(docNames[i]) || (agentMayVerify && p.ageDocumentVerified === true)
+  );
+
   // priceBooking'e verilecek yolcu listesi: doğum tarihi + belge durumu.
   const pricePassengers = input.passengers.map((p, i) => ({
     birthDate: p.birthDate,
-    hasIdDocument: Boolean(docNames[i]),
+    hasIdDocument: ageDocVerified[i],
   }));
 
   const holdExpiresAt = new Date(Date.now() + HOLD_MINUTES * 60 * 1000);
@@ -308,6 +337,26 @@ export async function createPendingBooking(
       if (place.price != null) unitPrice = place.price;
     }
   }
+  // Kupon doğrulaması: kod geçerli mi, sahibi bu müşteri mi, kullanılmış mı.
+  // Tutardan düşme aşağıda applyCouponTo ile yapılır; geçersiz kodda
+  // rezervasyon AÇILMAZ (müşteri indirim bekleyip tam ücret ödemesin).
+  let coupon: { id: string; amount: number; code: string } | null = null;
+  if (input.couponCode?.trim()) {
+    const { validateCoupon } = await import("@/lib/coupons");
+    const check = await validateCoupon(input.couponCode, input.userId ?? null);
+    if (!check.ok) return { ok: false, error: check.error };
+    coupon = { id: check.couponId, amount: check.amount, code: check.code };
+  }
+
+  // Kupon indirimi uygulanmış tutar. Kupon toplamdan büyükse tutar 0'a
+  // çekilir — artan kısım YANAR (para üstü verilmez), müşteri kupon
+  // girerken uyarılıyor.
+  const applyCouponTo = (total: number): number =>
+    coupon ? Math.max(0, total - coupon.amount) : total;
+  // Gerçekten düşen indirim (rapor/fatura için saklanır).
+  const couponAppliedOn = (total: number): number =>
+    coupon ? Math.min(coupon.amount, total) : 0;
+
   // İzin verilen koltuk durumları (elden satışta BLOKE koltuklar da satılabilir).
   const sellableStatuses = input.allowBlocked ? ["BOS", "BLOKE"] : ["BOS"];
 
@@ -371,7 +420,7 @@ export async function createPendingBooking(
         }
       }
 
-      const amount = priceBooking({
+      const gross = priceBooking({
         unitPrice,
         departureDate: departureIso,
         hasAccommodation: accommodation,
@@ -380,12 +429,15 @@ export async function createPendingBooking(
         accommodationType: input.accommodationType,
         singleSupplement: tour.singleSupplement,
       }).total;
+      const amount = applyCouponTo(gross);
+      const couponAmount = couponAppliedOn(gross);
       const booking = await tx.booking.create({
         data: {
           tourId: tour.id,
           departureId: departure.id,
           status: "BEKLIYOR",
           totalAmount: amount,
+          couponAmount,
           contactName: input.contactName,
           contactPhone: input.contactPhone,
           contactEmail: input.contactEmail,
@@ -419,6 +471,9 @@ export async function createPendingBooking(
               ageBand: bands[i],
               roomIndex: roomOf[i] ?? null,
               idDocument: docNames[i],
+              // Görevli gişede doğruladıysa yaş onayı da yazılır: admin
+              // panelinde tekrar "yaşı doğrula" beklenmesin.
+              ageVerified: agentMayVerify && p.ageDocumentVerified === true,
             })),
           },
         },
@@ -434,6 +489,23 @@ export async function createPendingBooking(
             status: { in: sellableStatuses },
           },
           data: { status: "KILITLI", gender: genderByCode[code] },
+        });
+      }
+
+      // Kuponu AYNI işlemde kullanıldı işaretle: yalnız hâlâ AKTIF ise
+      // (koşullu updateMany) — iki eşzamanlı ödeme aynı kuponu kullanamaz.
+      // İşaretleme tutmazsa işlem geri alınır, yani rezervasyon da açılmaz;
+      // müşteri indirim alıp kuponu elinde tutmaz.
+      if (coupon) {
+        const used = await tx.coupon.updateMany({
+          where: { id: coupon.id, status: "AKTIF" },
+          data: { status: "KULLANILDI", usedAt: new Date() },
+        });
+        if (used.count === 0)
+          return { ok: false as const, error: "Kupon az önce kullanılmış. Lütfen tekrar deneyin." };
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { couponId: coupon.id },
         });
       }
 
@@ -470,7 +542,7 @@ export async function createPendingBooking(
         error: `Yeterli kontenjan yok. Kalan: ${Math.max(0, left)} kişi.`,
       };
 
-    const amount = priceBooking({
+    const gross = priceBooking({
       unitPrice,
       departureDate: departureIso,
       hasAccommodation: accommodation,
@@ -479,12 +551,15 @@ export async function createPendingBooking(
       accommodationType: input.accommodationType,
       singleSupplement: tour.singleSupplement,
     }).total;
+    const amount = applyCouponTo(gross);
+    const couponAmount = couponAppliedOn(gross);
     const booking = await tx.booking.create({
       data: {
         tourId: tour.id,
         departureId: departure.id,
         status: "BEKLIYOR",
         totalAmount: amount,
+        couponAmount,
         contactName: input.contactName,
         contactPhone: input.contactPhone,
         contactEmail: input.contactEmail,
@@ -516,10 +591,26 @@ export async function createPendingBooking(
             ageBand: bands[i],
             roomIndex: roomOf[i] ?? null,
             idDocument: docNames[i],
+            ageVerified: agentMayVerify && p.ageDocumentVerified === true,
           })),
         },
       },
     });
+
+    // Kuponu AYNI işlemde kullanıldı işaretle (koltuklu yolla aynı kural).
+    if (coupon) {
+      const used = await tx.coupon.updateMany({
+        where: { id: coupon.id, status: "AKTIF" },
+        data: { status: "KULLANILDI", usedAt: new Date() },
+      });
+      if (used.count === 0)
+        return { ok: false as const, error: "Kupon az önce kullanılmış. Lütfen tekrar deneyin." };
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: { couponId: coupon.id },
+      });
+    }
+
     return {
       ok: true as const,
       bookingId: booking.id,
@@ -848,6 +939,17 @@ export async function cancelBooking(bookingId: string): Promise<void> {
         ]
       : []),
   ]);
+
+  // Kullanılan kupon yeniden kullanılabilir olsun — müşteri onu PUANIYLA
+  // almıştı, ödemeden vazgeçmek kuponu yakmamalı.
+  if (booking.couponId) {
+    try {
+      const { releaseCoupon } = await import("@/lib/coupons");
+      await releaseCoupon(booking.couponId);
+    } catch (e) {
+      console.error("[İptal: kupon geri açma hatası]", e);
+    }
+  }
 }
 
 // Rezervasyon detayındaki "Koltuk Değişimi" formu. Yerleştirme mantığı
@@ -939,6 +1041,17 @@ export async function cancelBookingByAdmin(
     console.error("[Sadakat puanı geri alma hatası]", e);
   }
 
+  // Kullanılan kupon yeniden kullanılabilir olsun: müşteri onu PUANIYLA
+  // almıştı, iptal yüzünden kaybetmemeli.
+  if (booking.couponId) {
+    try {
+      const { releaseCoupon } = await import("@/lib/coupons");
+      await releaseCoupon(booking.couponId);
+    } catch (e) {
+      console.error("[Kupon geri açma hatası]", e);
+    }
+  }
+
   if (opts?.notify !== false) {
     try {
       const { sendBookingCancellation } = await import("@/lib/notifications");
@@ -961,6 +1074,120 @@ export async function cancelBookingByAdmin(
 //
 // Kalkış tarihi GEÇMİŞ seferlere dokunulmaz: tur yapıldıktan sonra kaydı
 // iptale çekmek koltuğu boşaltıp geçmişi yanlış gösterir.
+// Rezervasyonu KALICI siler — koltuklarını serbest bırakıp puanını geri alarak.
+//
+// Neden ayrı fonksiyon: admin paneli bunu doğrudan `prisma.booking.delete` ile
+// yapıyordu ve iki şeyi atlıyordu —
+//   1. Koltuklar SATILDI/KILITLI kalıyordu. Yolcu satırları cascade ile
+//      silindiği için koltuk "dolu ama yolcusu yok" hâline geliyor, koltuk
+//      tahtasında turuncu "tutarsız kayıt / sahipsiz dolu koltuk" olarak
+//      görünüyor ve o koltuk bir daha SATILAMIYORDU.
+//   2. Üyeye yazılmış sadakat puanı geri alınmıyordu; silinen rezervasyonun
+//      puanı üyede kalıyordu.
+//
+// İptalden (cancelBooking) farkı: iptal kaydı IPTAL durumunda saklar, bu
+// fonksiyon kaydı tamamen siler. Müşteriye bildirim GÖNDERİLMEZ — silme bir
+// kayıt düzeltmesidir, müşteriye haber verilecek durum iptaldir.
+export async function deleteBookingRecord(
+  bookingId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const booking = await prisma.booking.findUnique({
+    where: { id: bookingId },
+    include: { passengers: { select: { seatCode: true } } },
+  });
+  if (!booking) return { ok: false, error: "Rezervasyon bulunamadı." };
+
+  // Puan geri alımı silmeden ÖNCE: revokeLoyaltyForBooking rezervasyonu
+  // okuyarak çalışıyor, kayıt silindikten sonra geri alınacak puanı bulamaz.
+  try {
+    const { revokeLoyaltyForBooking } = await import("@/lib/loyalty");
+    await revokeLoyaltyForBooking(bookingId);
+  } catch (e) {
+    console.error("[Silme: sadakat puanı geri alma hatası]", e);
+  }
+
+  // Kupon geri açılır — rezervasyon silinince kuponun kullanılmış kalması
+  // müşterinin puanını yok etmek olurdu.
+  if (booking.couponId) {
+    try {
+      const { releaseCoupon } = await import("@/lib/coupons");
+      await releaseCoupon(booking.couponId);
+    } catch (e) {
+      console.error("[Silme: kupon geri açma hatası]", e);
+    }
+  }
+
+  const seatCodes = booking.passengers
+    .map((p) => p.seatCode)
+    .filter((c): c is string => !!c);
+
+  await prisma.$transaction([
+    ...(seatCodes.length
+      ? [
+          prisma.seat.updateMany({
+            // Yalnız bu rezervasyonun seferindeki koltuklar. departureId null
+            // ise doğrudan null eşitliği kullanılır: koşullu yayılım turun TÜM
+            // seferlerindeki aynı kodlu koltukları yakalar ve başka
+            // müşterinin koltuğunu boşaltırdı (cancelBooking ile aynı kural).
+            where: {
+              tourId: booking.tourId,
+              departureId: booking.departureId,
+              code: { in: seatCodes },
+            },
+            data: { status: "BOS", gender: null },
+          }),
+        ]
+      : []),
+    prisma.booking.delete({ where: { id: bookingId } }),
+  ]);
+
+  return { ok: true };
+}
+
+// Sahipsiz dolu koltukları boşaltır — GEÇMİŞTE bozulmuş verinin onarımı.
+//
+// "Sahipsiz koltuk": SATILDI/KILITLI görünen ama onu tutan CANLI bir yolcu
+// (ODENDI veya BEKLIYOR rezervasyonda) bulunmayan koltuk. Koltuk tahtası
+// bunları turuncu "tutarsız kayıt" olarak zaten raporluyordu
+// (lib/seat-board.ts SAHIPSIZ_KOLTUK) ama düzeltmenin bir yolu yoktu; koltuk
+// dolu görünüp bir daha satılamıyordu.
+//
+// Kaynağı: eski deleteBooking koltukları bırakmadan rezervasyonu siliyordu
+// (artık deleteBookingRecord düzeltiyor). Bu fonksiyon o dönemde kalan
+// kayıtları temizler.
+//
+// BLOKE koltuklara DOKUNULMAZ: onları admin satışa kapatmak için kasten
+// işaretlemiştir, sahipsiz olmaları normaldir.
+export async function releaseOrphanSeats(
+  departureId: string
+): Promise<{ released: number; codes: string[] }> {
+  const seats = await prisma.seat.findMany({
+    where: { departureId, status: { in: ["SATILDI", "KILITLI"] } },
+    select: { code: true },
+  });
+  if (seats.length === 0) return { released: 0, codes: [] };
+
+  // Koltuğu tutan canlı yolcular. İPTAL/SURE_DOLDU rezervasyonlar sahip
+  // SAYILMAZ: o durumlarda koltuk zaten bırakılmış olmalıydı.
+  const live = await prisma.passenger.findMany({
+    where: {
+      booking: { departureId, status: { in: ["ODENDI", "BEKLIYOR"] } },
+      seatCode: { not: null },
+    },
+    select: { seatCode: true },
+  });
+  const owned = new Set(live.map((p) => p.seatCode as string));
+
+  const orphans = seats.map((s) => s.code).filter((code) => !owned.has(code));
+  if (orphans.length === 0) return { released: 0, codes: [] };
+
+  await prisma.seat.updateMany({
+    where: { departureId, code: { in: orphans }, status: { in: ["SATILDI", "KILITLI"] } },
+    data: { status: "BOS", gender: null },
+  });
+  return { released: orphans.length, codes: orphans };
+}
+
 export async function releaseUnpaidBalances(
   now: Date = new Date()
 ): Promise<{ cancelled: number; ids: string[]; failed: string[] }> {
